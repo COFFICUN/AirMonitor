@@ -1,0 +1,55 @@
+# Environment variables and local configuration
+.env
+.env.*
+!.env.example
+
+# Firmware credentials
+secrets.h
+**/secrets.h
+
+# TLS certificates and private keys
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# Local databases and exported measurement data
+*.db
+*.sqlite
+*.sqlite3
+airmonitor_sessions_*.csv
+exports/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python caches, tests and coverage
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+logs/
+
+# IDE and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary archives and files
+*.zip
+*.tmp
+*.temp
+*.bak
+*.swp

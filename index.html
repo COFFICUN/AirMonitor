@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AirMonitor — Дипломный проект мониторинга качества воздуха</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        :root {
+            --bg1:#07101e; --bg2:#0f1c35; --bg3:#13284d; --card:rgba(15,26,49,.72); --card-2:rgba(255,255,255,.045);
+            --border:rgba(173,201,255,.12); --soft:rgba(230,238,255,.78); --dim:rgba(230,238,255,.56);
+            --green:#22c55e; --yellow:#f59e0b; --orange:#f97316; --red:#ef4444; --violet:#8b5cf6; --cyan:#63e7d8; --accent:#77e4d5;
+            --shadow:0 24px 60px rgba(0,0,0,.24);
+        }
+        *{box-sizing:border-box}
+        body{margin:0;color:#fff;font-family:"Manrope","Segoe UI",system-ui,sans-serif;background:radial-gradient(circle at top left, rgba(119,228,213,.14), transparent 24%),radial-gradient(circle at top right, rgba(116,166,255,.18), transparent 22%),linear-gradient(135deg,var(--bg1) 0%, var(--bg2) 52%, var(--bg3) 100%);min-height:100vh}
+        .topbar{position:sticky;top:0;z-index:1050;backdrop-filter:blur(18px);background:rgba(7,16,30,.78);border-bottom:1px solid rgba(255,255,255,.06)}
+        .glass{background:var(--card);border:1px solid var(--border);border-radius:28px;backdrop-filter:blur(18px);box-shadow:var(--shadow)}
+        .glass-soft{background:var(--card-2);border:1px solid rgba(255,255,255,.08);border-radius:20px}
+        .brand-icon,.metric-icon{width:58px;height:58px;border-radius:18px;display:inline-flex;align-items:center;justify-content:center;background:linear-gradient(145deg, rgba(255,255,255,.09), rgba(255,255,255,.03));border:1px solid rgba(255,255,255,.08);color:#fff;font-size:1.3rem;flex-shrink:0}
+        .brand-title,.hero-title,.section-title{font-family:"Space Grotesk","Manrope",sans-serif}
+        .hero-title{font-size:clamp(1.85rem,3.8vw,3.35rem);line-height:1.06;font-weight:700;letter-spacing:-.05em;max-width:660px}
+        .hero-subtitle{color:var(--soft);max-width:680px;font-size:.95rem;line-height:1.56}
+        .eyebrow{display:inline-flex;align-items:center;gap:.55rem;padding:.55rem .9rem;border-radius:999px;background:rgba(119,228,213,.10);border:1px solid rgba(119,228,213,.20);color:#cffcf5;font-size:.82rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+        .hero-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.65rem;margin-top:.9rem}
+        .hero-meta-item{padding:.8rem .9rem;border-radius:18px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07)}
+        .hero-meta-value{display:block;margin-top:.18rem;color:#fff;font-size:.94rem;font-weight:800}
+        .badge-soft,.action-btn,.chip{display:inline-flex;align-items:center;gap:.55rem;padding:.78rem 1rem;border-radius:999px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09);color:#fff;font-weight:700;text-decoration:none}
+        .action-btn{cursor:pointer;transition:.18s ease;background:rgba(255,255,255,.045)}
+        .action-btn:hover{transform:translateY(-1px);background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.14)}
+        .action-btn.active{background:rgba(34,197,94,.18);border-color:rgba(34,197,94,.45);color:#dfffea}
+        .action-btn.loading{opacity:.8;pointer-events:none}
+        .status-dot{width:10px;height:10px;border-radius:999px;display:inline-block}.status-online{background:var(--green);box-shadow:0 0 12px var(--green)}.status-idle{background:var(--yellow);box-shadow:0 0 12px var(--yellow)}.status-offline{background:var(--red);box-shadow:0 0 12px var(--red)}
+        .summary-grid,.sensor-grid,.about-grid,.stack-grid{display:grid;gap:1rem}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sensor-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.about-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stack-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+        .summary-item,.sensor-item,.about-item,.stack-item{background:rgba(255,255,255,.038);border:1px solid rgba(255,255,255,.07);border-radius:20px;padding:1rem 1.05rem;height:100%}
+        .summary-label,.muted{color:var(--dim);font-size:.9rem}.summary-value{font-size:clamp(1.2rem,2vw,1.9rem);font-weight:800;line-height:1.1;word-break:break-word}
+        .summary-date{font-size:1.28rem}.summary-time{font-size:1.05rem;color:#dbe9ff;margin-top:.25rem}
+        .metric-card{position:relative;overflow:hidden;padding:1.5rem;min-height:220px;display:flex;flex-direction:column}.metric-card::after{content:"";position:absolute;width:150px;height:150px;right:-40px;bottom:-56px;border-radius:50%;background:rgba(255,255,255,.045)}.metric-card::before{content:"";position:absolute;left:0;top:0;right:0;height:1px;background:linear-gradient(90deg, rgba(255,255,255,.25), rgba(255,255,255,0))}
+        .metric-card.primary{background:linear-gradient(160deg, rgba(119,228,213,.16), rgba(17,31,58,.82));border-color:rgba(119,228,213,.22)}
+        .metric-label{color:var(--soft);font-size:1rem;margin-top:1rem;margin-bottom:.85rem}.metric-value{font-size:clamp(2.5rem,4vw,3.6rem);font-weight:800;line-height:1}.metric-unit{margin-top:.7rem;color:var(--soft);font-size:1.05rem}
+        .metric-footnote{margin-top:auto;padding-top:1rem;color:var(--dim);font-size:.92rem}
+        .signal-card{padding:1.32rem;min-height:100%;position:relative;overflow:hidden;display:flex;flex-direction:column}
+        .signal-card::after{content:"";position:absolute;inset:auto -38px -54px auto;width:132px;height:132px;border-radius:50%;background:rgba(255,255,255,.04)}
+        .signal-card.forecast-card{background:linear-gradient(160deg, rgba(249,115,22,.10), rgba(15,26,49,.86))}
+        .signal-card.aqi-card{background:linear-gradient(160deg, rgba(99,231,216,.10), rgba(15,26,49,.86))}
+        .signal-card.nowcast-card{background:linear-gradient(160deg, rgba(139,92,246,.10), rgba(15,26,49,.86))}
+        .signal-card.feed-card{background:linear-gradient(160deg, rgba(89,181,255,.10), rgba(15,26,49,.86))}
+        .signal-card.spread-card{background:linear-gradient(160deg, rgba(34,197,94,.12), rgba(15,26,49,.88));border-color:rgba(34,197,94,.18)}
+        .signal-header{display:flex;align-items:center;justify-content:space-between;gap:.85rem}
+        .signal-header .pill{flex-shrink:0}
+        .signal-value{font-size:clamp(1.9rem,3vw,2.75rem);font-weight:800;line-height:1.05;letter-spacing:-.04em}
+        .signal-value-row{display:flex;flex-direction:column;align-items:flex-start;gap:.22rem}
+        .signal-value-number{display:block;max-width:100%;word-break:break-word}
+        .signal-unit{display:block;font-size:.92rem;color:var(--soft);font-weight:700;white-space:nowrap;line-height:1.2;letter-spacing:0}
+        .signal-secondary{margin-top:.75rem;color:#f1f6ff;font-weight:700;font-size:.95rem;line-height:1.45}
+        .signal-note{margin-top:auto;padding-top:.95rem;color:rgba(230,238,255,.62);font-size:.88rem;line-height:1.55;min-height:4.15rem}
+        .signal-status{display:inline-flex;align-items:center;gap:.55rem;font-weight:800;color:#f5fbff}
+        .spread-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem;margin-top:.9rem}
+        .spread-item{padding:.72rem .78rem;border-radius:16px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)}
+        .spread-value{display:block;margin-top:.2rem;font-size:1.08rem;font-weight:800}
+        .section-title{font-size:1.5rem;font-weight:700;margin-bottom:.3rem;letter-spacing:-.03em}.section-subtitle{color:var(--dim);margin-bottom:1rem;line-height:1.65}
+        .pill{display:inline-flex;align-items:center;gap:.45rem;padding:.55rem .85rem;border-radius:999px;font-size:.92rem;font-weight:800;line-height:1.1;white-space:normal;max-width:100%}
+        .pill-good{background:rgba(34,197,94,.16);color:#b9f7cf;border:1px solid rgba(34,197,94,.35)}
+        .pill-moderate{background:rgba(245,158,11,.16);color:#ffe1a4;border:1px solid rgba(245,158,11,.35)}
+        .pill-elevated{background:rgba(249,115,22,.16);color:#ffd1b1;border:1px solid rgba(249,115,22,.35)}
+        .pill-bad{background:rgba(239,68,68,.16);color:#ffc1c1;border:1px solid rgba(239,68,68,.35)}
+        .pill-severe{background:rgba(139,92,246,.16);color:#e0d1ff;border:1px solid rgba(139,92,246,.35)}
+        .pill-neutral{background:rgba(124,135,152,.16);color:#d8dde8;border:1px solid rgba(124,135,152,.35)}
+        .chip{padding:.55rem .8rem;font-size:.92rem;font-weight:700}
+        .hero-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:1.4rem;align-items:start}
+        .map-shell{overflow:hidden}.map-toolbar,.chart-toolbar{display:flex;flex-wrap:wrap;gap:.7rem;align-items:center;justify-content:space-between;margin-bottom:1rem}
+        .toolbar-group{display:flex;flex-wrap:wrap;gap:.55rem;align-items:center}
+        #map{height:560px;border-radius:22px;overflow:hidden;background:#11203f}
+        .legend-box{padding:.85rem 1rem;background:rgba(9,16,30,.92);color:#fff;border-radius:14px;border:1px solid rgba(255,255,255,.12);box-shadow:0 6px 20px rgba(0,0,0,.18);font-size:.9rem;line-height:1.35}
+        .legend-row{display:flex;align-items:center;gap:.55rem;margin:.2rem 0}.legend-dot{width:14px;height:14px;border-radius:999px;display:inline-block}
+        .map-pin{display:flex;align-items:center;justify-content:center;min-width:50px;height:34px;padding:0 12px;border-radius:999px;font-weight:800;color:#fff;border:2px solid rgba(255,255,255,.92);box-shadow:0 10px 22px rgba(0,0,0,.28);font-size:.92rem;backdrop-filter:blur(6px)}
+        .map-pin.latest{height:40px;min-width:58px;animation:pulseLatest 2s infinite}
+        @keyframes pulseLatest{0%{box-shadow:0 0 0 0 rgba(255,255,255,.35),0 10px 22px rgba(0,0,0,.28)}70%{box-shadow:0 0 0 15px rgba(255,255,255,0),0 10px 22px rgba(0,0,0,.28)}100%{box-shadow:0 0 0 0 rgba(255,255,255,0),0 10px 22px rgba(0,0,0,.28)}}
+        .map-popup{min-width:220px}.map-popup b{font-size:1rem}
+        .aqi-gauge{display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:center}.aqi-number{font-size:3rem;font-weight:900;line-height:1}.aqi-bar{height:14px;border-radius:999px;overflow:hidden;background:linear-gradient(90deg,#22c55e 0 18%, #f59e0b 18% 38%, #f97316 38% 55%, #ef4444 55% 78%, #8b5cf6 78% 100%);position:relative}
+        .aqi-thumb{position:absolute;top:-4px;width:22px;height:22px;border-radius:50%;background:#fff;border:3px solid rgba(8,17,32,.9);transform:translateX(-50%)}
+        .analytics-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:1rem}.history-table{width:100%;border-collapse:separate;border-spacing:0 .55rem}.history-table td,.history-table th{padding:.9rem 1rem}.history-table thead th{color:var(--dim);font-size:.9rem;font-weight:700}.history-table tbody tr{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.06)}.history-table tbody td:first-child{border-radius:14px 0 0 14px}.history-table tbody td:last-child{border-radius:0 14px 14px 0}
+        .small-value{font-size:1.5rem;font-weight:800}.about-item h5,.stack-item h5{font-weight:800}.about-grid-project .about-item:last-child{grid-column:1 / -1}.footer-note{color:var(--dim);font-size:.92rem}.goal-box{margin-top:1.15rem;padding:1rem 1.1rem;border-radius:20px;background:linear-gradient(135deg, rgba(99,231,216,.10), rgba(255,255,255,.04));border:1px solid rgba(99,231,216,.18)}.goal-title{font-size:.92rem;color:var(--cyan);font-weight:800;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.35rem}.caption-strong{font-weight:700;color:#eaf3ff}.header-actions{display:flex;flex-wrap:wrap;justify-content-lg-end;gap:.55rem}.header-actions .badge-soft,.header-actions .action-btn,.header-actions a.action-btn{text-decoration:none}.export-btn{background:rgba(99,231,216,.12);border-color:rgba(99,231,216,.30)}
+        .line-route{stroke-dasharray:10 10}
+        .chart-box{height:360px}
+        .map-note{color:var(--dim);font-size:.92rem}
+        .switcher{display:inline-flex;padding:.28rem;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.07);border-radius:999px;gap:.25rem}
+        .switcher .action-btn{padding:.55rem .8rem;background:transparent;border:none}
+        .switcher .action-btn.active{background:rgba(119,228,213,.14);border:1px solid rgba(119,228,213,.18);box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}
+        .badge-kpi{display:inline-flex;gap:.45rem;align-items:center;padding:.45rem .7rem;border-radius:999px;background:rgba(255,255,255,.06);font-weight:700;color:#fff;border:1px solid rgba(255,255,255,.08)}
+        .dashboard-panel{position:relative;overflow:hidden}
+        .dashboard-panel::before{content:"";position:absolute;inset:auto -100px -120px auto;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle, rgba(119,228,213,.12), transparent 68%);pointer-events:none}
+        .section-frame{padding:1.3rem;border-radius:22px;background:rgba(255,255,255,.028);border:1px solid rgba(255,255,255,.055)}
+        .summary-divider{height:1px;background:linear-gradient(90deg, rgba(255,255,255,.12), rgba(255,255,255,.02));margin:1rem 0 1rem}
+        .live-pm-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem}
+        .live-pm-item{padding:.85rem .9rem;border-radius:16px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06)}
+        .live-pm-value{font-size:1.35rem;font-weight:800;line-height:1.1;margin-top:.22rem}
+        .summary-meta-row{display:flex;flex-wrap:wrap;gap:.55rem;margin-top:.95rem}
+        .history-table tbody tr{background:rgba(255,255,255,.028);border:1px solid rgba(255,255,255,.05);transition:.18s ease}
+        .history-table tbody tr:hover{background:rgba(255,255,255,.05);transform:translateY(-1px)}
+        .compact-header{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:.5rem}
+        .compact-badge,.compact-action{padding:.62rem .85rem;font-size:.92rem;border-radius:18px}
+        .compact-badge i,.compact-action i{font-size:.95rem}
+        .compact-badge span{white-space:nowrap}
+        .header-actions.compact-header .badge-soft,.header-actions.compact-header .action-btn{min-height:44px}
+        .header-actions .status-card{background:rgba(119,228,213,.12);border-color:rgba(119,228,213,.24)}
+        .header-actions .primary-action{background:linear-gradient(135deg, rgba(119,228,213,.18), rgba(99,231,216,.10));border-color:rgba(119,228,213,.28)}
+        .summary-item{padding:1rem 1rem}
+        .summary-value{font-size:clamp(1.15rem,1.8vw,1.8rem)}
+        .pill{padding:.5rem .9rem;line-height:1.2;min-height:38px;display:inline-flex;align-items:center;justify-content:center}
+        .badge-kpi{min-height:38px}
+        .map-shell{overflow:visible}
+        #map{height:560px;border-radius:24px;overflow:hidden;background:#11203f;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+        .legend-box{padding:.95rem 1rem;background:rgba(9,16,30,.9);color:#fff;border-radius:16px;border:1px solid rgba(255,255,255,.12);box-shadow:0 10px 30px rgba(0,0,0,.2);font-size:.9rem;line-height:1.35}
+        .map-pin{display:flex;align-items:center;justify-content:center;min-width:64px;min-height:42px;padding:0 14px;border-radius:14px;font-weight:800;color:#fff;border:2px solid rgba(255,255,255,.88);box-shadow:0 10px 24px rgba(0,0,0,.26);font-size:.96rem;backdrop-filter:blur(8px)}
+        .map-pin.latest{min-width:72px;min-height:46px;border-radius:16px}
+        .map-pin .sub{font-size:.74rem;font-weight:700;opacity:.9;margin-left:4px}
+        .map-popup{min-width:250px}
+        .sensor-item .small-value,.summary-item .summary-value,.stack-item .small-value{word-break:break-word}
+        .toolbar-group .action-btn{min-height:42px}
+        .history-table td:nth-child(5){min-width:150px}
+
+        @media (max-width: 1199px){.hero-grid,.analytics-grid,.hero-meta{grid-template-columns:1fr}.summary-grid,.stack-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+        @media (max-width: 991px){.sensor-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.about-grid{grid-template-columns:1fr}.topbar .row{gap:1rem}.chart-box{height:320px}#map{height:460px}.live-pm-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+        @media (max-width: 767px){.summary-grid,.stack-grid,.hero-meta,.live-pm-grid{grid-template-columns:1fr}.sensor-grid{grid-template-columns:1fr 1fr}.metric-card{min-height:185px}.chart-box{height:290px}#map{height:380px}.history-table td,.history-table th{padding:.75rem .7rem;font-size:.92rem}.hero-title{max-width:none}.brand-wrap{align-items:flex-start !important}}
+        @media (max-width: 575px){.sensor-grid{grid-template-columns:1fr}.metric-value{font-size:2.7rem}.aqi-number{font-size:2.35rem}.action-btn,.badge-soft{font-size:.92rem;padding:.72rem .9rem}}
+    </style>
+</head>
+<body>
+<nav class="topbar py-3">
+    <div class="container-fluid px-4 px-lg-5">
+        <div class="row align-items-center">
+            <div class="col-xl-5 col-lg-4">
+                <div class="d-flex align-items-center gap-3 brand-wrap">
+                    <div class="brand-icon"><i class="fa-solid fa-wind"></i></div>
+                    <div>
+                        <div class="fs-1 fw-bold lh-1 brand-title">AirMonitor</div>
+                        <div class="muted">Дипломный проект мониторинга качества воздуха</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-xl-7 col-lg-8">
+                <div class="header-actions compact-header">
+                    <span class="badge-soft compact-badge status-card"><span id="status-dot" class="status-dot status-{{ system_status.state }}"></span><span id="system-status-text">{{ system_status.label }}</span></span>
+                    <span class="badge-soft compact-badge"><i class="fa-regular fa-clock"></i><span>Обновлено: <span id="last-update-freshness">{{ system_status.freshness_text }}</span></span></span>
+                    <span id="location-status-badge" class="badge-soft compact-badge"><i class="fa-solid fa-location-crosshairs"></i><span id="location-status-text">ожидание разрешения</span></span>
+                    <span class="badge-soft compact-badge"><i class="fa-solid fa-layer-group"></i><span>Пакетов: <span id="total-records">{{ total_records }}</span></span></span>
+                    <a href="/export/csv" class="action-btn export-btn compact-action"><i class="fa-solid fa-file-arrow-down"></i><span>CSV</span></a>
+                    <button id="location-btn" class="action-btn compact-action primary-action" type="button"><i class="fa-solid fa-location-dot"></i><span id="location-btn-text">Геолокация</span></button>
+                </div>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<main class="container-fluid px-4 px-lg-5 py-4 py-lg-5">
+    <section class="hero-grid mb-4 mb-lg-5">
+        <div class="glass p-4 p-lg-4 dashboard-panel">
+            <div class="eyebrow mb-3"><i class="fa-solid fa-satellite-dish"></i> Air Quality Monitoring</div>
+            <div class="hero-title mb-3">Геопривязанный контроль PM2.5, AQI и маршрутов замера</div>
+            <p class="hero-subtitle mb-4">Панель собирает данные с полевого комплекса, привязывает их к контрольным точкам и показывает текущее состояние воздуха без перегрузки. Основной акцент сделан на качестве воздуха, тренде и сравнении локаций.</p>
+            <div class="d-flex flex-wrap gap-2">
+                <span class="badge-soft"><i class="fa-solid fa-shield-halved"></i> HTTPS и secure context</span>
+                <span class="badge-soft"><i class="fa-solid fa-chart-line"></i> Интеллектуальная аналитика</span>
+                <span class="badge-soft"><i class="fa-solid fa-map-location-dot"></i> Карта, маршрут и зоны</span>
+            </div>
+            <div class="hero-meta">
+                <div class="hero-meta-item">
+                    <div class="summary-label">Главная метрика</div>
+                    <span class="hero-meta-value">PM2.5 и AQI в реальном времени</span>
+                </div>
+                <div class="hero-meta-item">
+                    <div class="summary-label">Локации</div>
+                    <span class="hero-meta-value">Контрольные точки, зоны и траектории</span>
+                </div>
+                <div class="hero-meta-item">
+                    <div class="summary-label">Результат</div>
+                    <span class="hero-meta-value">Быстро видно, где воздух ухудшается</span>
+                </div>
+            </div>
+        </div>
+        <div class="glass p-4 section-frame">
+            <div class="section-title mb-3">Сводка системы</div>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <div class="summary-label">Последняя сессия</div>
+                    <div id="summary-date" class="summary-value summary-date">{{ latest.date_text if latest else '—' }}</div>
+                    <div id="summary-time" class="summary-time">{{ latest.time_text if latest else '—' }}</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Качество воздуха</div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <span id="aqi-pill" class="pill {{ air_quality.class_name }}">{{ air_quality.short }}</span>
+                        <span class="badge-kpi">AQI <span id="aqi-value-inline">{{ air_quality.aqi if air_quality.aqi is not none else '—' }}</span></span>
+                    </div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Средний PM2.5 за 24 ч по сессиям</div>
+                    <div id="avg-pm25" class="summary-value">{{ stats.avg_pm25 if stats.avg_pm25 is not none else '—' }}</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Сессий за 24 ч</div>
+                    <div id="records-24h" class="summary-value">{{ stats.records }}</div>
+                </div>
+            </div>
+            <div class="summary-divider"></div>
+            <div class="summary-label mb-2">Live-данные PM сенсора</div>
+            <div class="live-pm-grid">
+                <div class="live-pm-item">
+                    <div class="summary-label">PM1</div>
+                    <div id="summary-pm1" class="live-pm-value">{{ latest.pm1 if latest else '—' }}</div>
+                </div>
+                <div class="live-pm-item">
+                    <div class="summary-label">PM2.5</div>
+                    <div id="summary-pm25-live" class="live-pm-value">{{ latest.pm25 if latest else '—' }}</div>
+                </div>
+                <div class="live-pm-item">
+                    <div class="summary-label">PM10</div>
+                    <div id="summary-pm10" class="live-pm-value">{{ latest.pm10 if latest else '—' }}</div>
+                </div>
+            </div>
+            <div class="summary-meta-row">
+                <span class="badge-kpi">Сессия: <span id="summary-session-duration">{{ measurement_state.session_duration_text if measurement_state.measurement_enabled else 'неактивно' }}</span></span>
+                <span class="badge-kpi">Измерений: <span id="summary-session-samples">{{ measurement_state.session_sample_count }}</span></span>
+            </div>
+        </div>
+    </section>
+
+    <section class="row g-4 mb-4 mb-lg-5 align-items-start">
+        <div class="col-lg-4">
+            <div class="glass metric-card h-100">
+                <div class="metric-icon"><i class="fa-solid fa-temperature-three-quarters"></i></div>
+                <div class="metric-label">Температура</div>
+                <div id="temperature-value" class="metric-value">{{ latest.temperature if latest else '—' }}</div>
+                <div class="metric-unit">°C</div>
+                <div class="metric-footnote">Фоновый климатический параметр для интерпретации замера.</div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="glass metric-card h-100">
+                <div class="metric-icon"><i class="fa-solid fa-droplet"></i></div>
+                <div class="metric-label">Относительная влажность</div>
+                <div id="humidity-value" class="metric-value">{{ latest.humidity if latest else '—' }}</div>
+                <div class="metric-unit">%</div>
+                <div class="metric-footnote">Помогает оценить условия и поведение аэрозолей.</div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="glass metric-card primary h-100">
+                <div class="metric-icon"><i class="fa-solid fa-smog"></i></div>
+                <div class="metric-label">Концентрация PM2.5</div>
+                <div class="metric-value d-flex flex-wrap gap-3 align-items-end"><span id="pm25-value">{{ latest.pm25 if latest else '—' }}</span><span id="pm25-pill" class="pill {{ air_quality.class_name }}">{{ air_quality.short }}</span></div>
+                <div class="metric-unit">мкг/м³</div>
+                <div class="metric-footnote">Ключевой индикатор качества воздуха для карты и аналитики.</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="row g-4 mb-4 mb-lg-5 align-items-stretch">
+        <div class="col-xl-3 col-md-6">
+            <div class="glass signal-card forecast-card h-100">
+                <div class="signal-header">
+                    <div class="metric-icon"><i class="fa-solid fa-arrow-trend-up"></i></div>
+                    <span id="forecast-quality-pill" class="pill {{ trend.forecast_quality.class_name }}">{{ trend.forecast_quality.short }}</span>
+                </div>
+                <div class="metric-label">Прогнозируемый PM2.5</div>
+                <div class="signal-value signal-value-row"><span id="forecast-pm25" class="signal-value-number">{{ trend.forecast_pm25 if trend.forecast_pm25 is not none else '—' }}</span><span class="signal-unit">мкг/м³</span></div>
+                <div class="signal-secondary">Прогнозный AQI: <span id="forecast-aqi">{{ trend.forecast_aqi if trend.forecast_aqi is not none else '—' }}</span></div>
+                <div class="signal-note">Тренд: <span id="trend-direction">{{ trend.direction }}</span>. Δ за последние точки: <span id="trend-delta">{{ trend.delta if trend.delta is not none else '—' }}</span>.</div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="glass signal-card aqi-card h-100">
+                <div class="signal-header">
+                    <div class="metric-icon"><i class="fa-solid fa-gauge-high"></i></div>
+                    <span id="aqi-short" class="pill {{ air_quality.class_name }}">{{ air_quality.short }}</span>
+                </div>
+                <div class="metric-label">AQI</div>
+                <div id="aqi-number" class="signal-value">{{ air_quality.aqi if air_quality.aqi is not none else '—' }}</div>
+                <div class="signal-secondary">Статус воздуха: <span id="aqi-caption">{{ air_quality.label }}</span></div>
+                <div id="aqi-recommendation" class="signal-note">{{ air_quality.recommendation }}</div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="glass signal-card nowcast-card h-100">
+                <div class="signal-header">
+                    <div class="metric-icon"><i class="fa-solid fa-wave-square"></i></div>
+                    <span id="nowcast-quality" class="pill {{ nowcast.quality.class_name }}">{{ nowcast.quality.short }}</span>
+                </div>
+                <div class="metric-label">NowCast PM2.5</div>
+                <div class="signal-value signal-value-row"><span id="nowcast-pm25" class="signal-value-number">{{ nowcast.pm25 if nowcast.pm25 is not none else '—' }}</span><span class="signal-unit">мкг/м³</span></div>
+                <div class="signal-secondary">NowCast AQI: <span id="nowcast-aqi">{{ nowcast.aqi if nowcast.aqi is not none else '—' }}</span></div>
+                <div id="nowcast-method" class="signal-note">{{ nowcast.method if nowcast.available else 'Недостаточно данных для расчёта NowCast' }}</div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="glass signal-card spread-card h-100">
+                <div class="signal-header">
+                    <div class="metric-icon"><i class="fa-solid fa-arrow-up-right-dots"></i></div>
+                    {% if stats.min_pm25 is not none and stats.max_pm25 is not none %}
+                        {% set spread_pm25 = (stats.max_pm25 - stats.min_pm25)|round(1) %}
+                        {% if spread_pm25 < 10 %}
+                            <span id="spread-pill" class="pill pill-good">стабильно</span>
+                        {% elif spread_pm25 <= 30 %}
+                            <span id="spread-pill" class="pill pill-moderate">умеренно</span>
+                        {% else %}
+                            <span id="spread-pill" class="pill pill-bad">скачки</span>
+                        {% endif %}
+                    {% else %}
+                        <span id="spread-pill" class="pill pill-neutral">нет данных</span>
+                    {% endif %}
+                </div>
+                <div class="metric-label">Разброс PM2.5</div>
+                <div class="spread-grid">
+                    <div class="spread-item">
+                        <div class="summary-label">Минимум</div>
+                        <span id="spread-min" class="spread-value">{{ stats.min_pm25 if stats.min_pm25 is not none else '—' }}</span>
+                    </div>
+                    <div class="spread-item">
+                        <div class="summary-label">Максимум</div>
+                        <span id="spread-max" class="spread-value">{{ stats.max_pm25 if stats.max_pm25 is not none else '—' }}</span>
+                    </div>
+                    <div class="spread-item">
+                        <div class="summary-label">Диапазон</div>
+                        <span id="spread-range" class="spread-value">{{ ((stats.max_pm25 - stats.min_pm25)|round(1)) if stats.min_pm25 is not none and stats.max_pm25 is not none else '—' }}</span>
+                    </div>
+                    <div class="spread-item">
+                        <div class="summary-label">Оценка</div>
+                        <span id="spread-status-text" class="spread-value">{% if stats.min_pm25 is not none and stats.max_pm25 is not none %}{% if spread_pm25 < 10 %}стабильно{% elif spread_pm25 <= 30 %}умеренные{% else %}скачки{% endif %}{% else %}нет данных{% endif %}</span>
+                    </div>
+                </div>
+                <div class="signal-note">Сравнение минимального и максимального PM2.5 по последним сессиям за 24 часа.</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="row g-4 mb-4 mb-lg-5 align-items-start">
+        <div class="col-xl-8">
+            <div class="glass p-4 h-100">
+                <div class="chart-toolbar">
+                    <div>
+                        <div class="section-title">График последней сессии замера</div>
+                        <div class="map-note">График строится только по последней точке замера. PM2.5 сглажен, чтобы линия читалась стабильнее внутри одной локации.</div>
+                    </div>
+                    <div class="toolbar-group">
+                        <div class="switcher" id="chart-limit-switcher">
+                            <button class="action-btn" data-limit="24">24 точки</button>
+                            <button class="action-btn" data-limit="48">48 точек</button>
+                            <button class="action-btn active" data-limit="96">96 точек</button>
+                            <button class="action-btn" data-limit="144">144 точки</button>
+                        </div>
+                        <button id="refresh-chart-btn" class="action-btn"><i class="fa-solid fa-rotate"></i> Обновить график</button>
+                    </div>
+                </div>
+                <div class="chart-box"><canvas id="trendChart"></canvas></div>
+                <div class="d-flex flex-wrap gap-2 justify-content-between mt-3">
+                    <div class="toolbar-group">
+                        <span class="badge-kpi">Последняя сессия графика: <span id="chart-generated-at">{{ generated_at }}</span></span>
+                    </div>
+                    <div class="toolbar-group">
+                        <span class="badge-kpi">Прогноз PM2.5 по сессии: <span id="forecast-chip">{{ trend.forecast_pm25 if trend.forecast_pm25 is not none else '—' }}</span></span>
+                        <span class="badge-kpi">Тренд в точке: <span id="trend-chip">{{ trend.direction }}</span></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-4">
+            <div class="glass p-4 h-100">
+                <div class="section-title">Текущие данные PMS7003</div>
+                <div class="section-subtitle">Счётчики частиц из последнего пакета внутри активной сессии.</div>
+                <div class="sensor-grid">
+                    <div class="sensor-item"><div class="summary-label">PM1</div><div id="sensor-pm1" class="small-value">{{ latest.pm1 if latest else '—' }}</div></div>
+                    <div class="sensor-item"><div class="summary-label">PM10</div><div id="sensor-pm10" class="small-value">{{ latest.pm10 if latest else '—' }}</div></div>
+                    <div class="sensor-item"><div class="summary-label">0.3μm</div><div id="sensor-pc03" class="small-value">{{ latest.pc0_3 if latest else '—' }}</div></div>
+                    <div class="sensor-item"><div class="summary-label">0.5μm</div><div id="sensor-pc05" class="small-value">{{ latest.pc0_5 if latest else '—' }}</div></div>
+                    <div class="sensor-item"><div class="summary-label">1.0μm</div><div id="sensor-pc10" class="small-value">{{ latest.pc1_0 if latest else '—' }}</div></div>
+                    <div class="sensor-item"><div class="summary-label">2.5μm</div><div id="sensor-pc25" class="small-value">{{ latest.pc2_5 if latest else '—' }}</div></div>
+                    <div class="sensor-item"><div class="summary-label">5.0μm</div><div id="sensor-pc50" class="small-value">{{ latest.pc5_0 if latest else '—' }}</div></div>
+                    <div class="sensor-item"><div class="summary-label">10μm</div><div id="sensor-pc100" class="small-value">{{ latest.pc10 if latest else '—' }}</div></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="glass p-4 mb-4 mb-lg-5 map-shell">
+        <div class="map-toolbar">
+            <div>
+                <div class="section-title">Карта контрольных точек замера</div>
+                <div class="map-note">Карта показывает отдельные сессии замера по контрольным точкам города. Каждая точка — это отдельная остановка с серией измерений; запись разрешается только после получения геолокации.</div>
+            </div>
+            <div class="toolbar-group">
+                <div class="switcher" id="map-mode-switcher">
+                    <button class="action-btn active" data-mode="pins">Пины AQI</button>
+                    <button class="action-btn" data-mode="zones">Тепловые зоны</button>
+                    <button class="action-btn" data-mode="route">Траектория</button>
+                </div>
+                <div class="switcher" id="map-period-switcher">
+                    <button class="action-btn" data-period="30m">30 мин</button>
+                    <button class="action-btn" data-period="1h">1 час</button>
+                    <button class="action-btn active" data-period="24h">24 часа</button>
+                    <button class="action-btn" data-period="all">Всё</button>
+                </div>
+                <button id="refresh-map-btn" class="action-btn"><i class="fa-solid fa-map"></i> Обновить карту</button>
+            </div>
+        </div>
+        <div class="row g-4">
+            <div class="col-xl-9">
+                <div id="map"></div>
+            </div>
+            <div class="col-xl-3">
+                <div class="glass-soft p-3 h-100">
+                    <div class="summary-label">Последняя сессия карты</div>
+                    <div id="map-generated-at" class="summary-value mb-3">{{ map_summary.generated_at }}</div>
+                    <div class="summary-label">Режим отображения</div>
+                    <div id="map-mode-label" class="pill pill-neutral mb-3">AQI-пины</div>
+                    <div class="summary-label">Пиковый PM2.5</div>
+                    <div id="map-max-pm25" class="small-value mb-3">{{ map_summary.max_pm25 if map_summary.max_pm25 is not none else '—' }}</div>
+                    <div class="summary-label">Средний PM2.5 по точкам</div>
+                    <div id="map-avg-pm25" class="small-value mb-3">{{ map_summary.avg_pm25 if map_summary.avg_pm25 is not none else '—' }}</div>
+                    <div class="summary-label">Последние координаты точки</div>
+                    <div id="map-last-coords" class="fw-semibold">{% if map_summary.last_coordinates %}{{ map_summary.last_coordinates.latitude }}, {{ map_summary.last_coordinates.longitude }}{% else %}—{% endif %}</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="glass p-4 mb-4 mb-lg-5">
+        <div class="section-title">Последние сессии замера</div>
+        <div class="section-subtitle">История последних точек наблюдения с усреднёнными значениями по каждой сессии.</div>
+        <div class="table-responsive">
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>Конец сессии</th>
+                        <th>Температура</th>
+                        <th>Влажность</th>
+                        <th>PM2.5</th>
+                        <th>Стабильность</th>
+                        <th>Координаты</th>
+                    </tr>
+                </thead>
+                <tbody id="history-body">
+                {% for row in recent_rows %}
+                    <tr>
+                        <td>{{ row.date_text }} {{ row.time_text }}</td>
+                        <td>{{ row.temperature if row.temperature is not none else '—' }} °C</td>
+                        <td>{{ row.humidity if row.humidity is not none else '—' }} %</td>
+                        <td><span class="pill {{ row.air_quality.class_name }}">{{ row.pm25 if row.pm25 is not none else '—' }}</span></td>
+                        <td><span class="pill {{ row.stability.class_name }}">{{ row.stability.short }}</span></td>
+                        <td>{% if row.latitude and row.longitude %}{{ '%.5f'|format(row.latitude) }}, {{ '%.5f'|format(row.longitude) }}{% else %}—{% endif %}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="row g-4 mb-4 mb-lg-5 align-items-start">
+        <div class="col-xl-6">
+            <div class="glass p-4">
+                <div class="section-title">О проекте</div>
+                <div class="about-grid about-grid-project mt-3">
+                    <div class="about-item">
+                        <h5><i class="fa-solid fa-microchip me-2"></i>Аппаратная часть</h5>
+                        <p class="mb-0 muted">Контроллер измеряет температуру, влажность и концентрации частиц, после чего передаёт пакеты данных на Flask‑сервер по защищённому HTTPS‑соединению.</p>
+                    </div>
+                    <div class="about-item">
+                        <h5><i class="fa-solid fa-server me-2"></i>Программная часть</h5>
+                        <p class="mb-0 muted">Flask и SQLite обеспечивают хранение сырых пакетов, объединение их в сессии замера, расчёт AQI, построение карты контрольных точек и веб-интерфейс в реальном времени.</p>
+                    </div>
+                    <div class="about-item">
+                        <h5><i class="fa-solid fa-bullseye me-2"></i>Практическая ценность</h5>
+                        <p class="mb-0 muted">Система подходит для оценки качества воздуха по отдельным контрольным точкам города, возле дорог и в помещениях, где важны геопривязка и сопоставление локаций между собой.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-6">
+            <div class="glass p-4">
+                <div class="section-title">Технологический стек</div>
+                <div class="about-grid mt-3">
+                    <div class="stack-item"><h5><i class="fa-solid fa-wifi me-2"></i>Связь</h5><p class="mb-0 muted">Wi‑Fi, HTTPS, secure context, доступ к геолокации с телефона и ноутбука.</p></div>
+                    <div class="stack-item"><h5><i class="fa-solid fa-database me-2"></i>Хранение</h5><p class="mb-0 muted">SQLite сохраняет сырые пакеты и сессии замера, что позволяет строить графики по точке, карту контрольных локаций и аналитические сводки.</p></div>
+                    <div class="stack-item"><h5><i class="fa-solid fa-chart-pie me-2"></i>Аналитика</h5><p class="mb-0 muted">AQI, прогноз, сглаженный график последней сессии, карта контрольных точек и оценка риска по PM2.5.</p></div>
+                    <div class="stack-item"><h5><i class="fa-solid fa-battery-full me-2"></i>Эксплуатация</h5><p class="mb-0 muted">Портативная установка с возможностью питания от пауэрбанка и демонстрации на выезде.</p></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="footer-note text-center pb-2">Дипломный проект — Тельманов Назар</div>
+</main>
+
+<script>
+const initialChartRows = {{ chart_rows|tojson }};
+const initialMapPoints = {{ map_points|tojson }};
+const initialRoutePoints = {{ route_points|tojson }};
+const initialMapSummary = {{ map_summary|tojson }};
+let selectedChartLimit = 96;
+let selectedMapMode = 'pins';
+let selectedMapPeriod = '24h';
+let chart;
+let map;
+let mapLayers = [];
+let latestLocationMarker = null;
+let watchId = null;
+let locationTracking = false;
+
+function getColorByPm25(pm25){
+    if(pm25 == null) return '#7c8798';
+    if(pm25 <= 12) return '#22c55e';
+    if(pm25 <= 35) return '#f59e0b';
+    if(pm25 <= 55) return '#f97316';
+    if(pm25 <= 150) return '#ef4444';
+    return '#8b5cf6';
+}
+
+function qualityClassByPm25(pm25){
+    if(pm25 == null) return 'pill-neutral';
+    if(pm25 <= 12) return 'pill-good';
+    if(pm25 <= 35) return 'pill-moderate';
+    if(pm25 <= 55) return 'pill-elevated';
+    if(pm25 <= 150) return 'pill-bad';
+    return 'pill-severe';
+}
+
+function getSpreadMeta(minPm25, maxPm25){
+    if(minPm25 == null || maxPm25 == null){
+        return { range: '—', short: 'нет данных', text: 'нет данных', className: 'pill-neutral' };
+    }
+    const range = Math.max(0, Number(maxPm25) - Number(minPm25));
+    if(range < 10){
+        return { range: range.toFixed(1), short: 'стабильно', text: 'стабильно', className: 'pill-good' };
+    }
+    if(range <= 30){
+        return { range: range.toFixed(1), short: 'умеренно', text: 'умеренные', className: 'pill-moderate' };
+    }
+    return { range: range.toFixed(1), short: 'скачки', text: 'скачки', className: 'pill-bad' };
+}
+
+function setButtonLoading(button, isLoading){
+    if(!button) return;
+    button.classList.toggle('loading', isLoading);
+}
+
+function updateActiveSwitcher(containerId, value, attr){
+    document.querySelectorAll(`#${containerId} .action-btn`).forEach(btn => {
+        btn.classList.toggle('active', btn.dataset[attr] === String(value));
+    });
+}
+
+function initChart(rows){
+    const ctx = document.getElementById('trendChart').getContext('2d');
+    chart = new Chart(ctx, {
+        type: 'line',
+        data: buildChartData(rows),
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { labels: { color: '#dbe9ff', font: { size: 13, weight: '600' } } },
+                tooltip: {
+                    backgroundColor: 'rgba(9,16,30,.94)',
+                    borderColor: 'rgba(255,255,255,.15)',
+                    borderWidth: 1,
+                    titleColor: '#fff', bodyColor: '#fff'
+                }
+            },
+            scales: {
+                x: { ticks: { color: 'rgba(232,239,255,.62)', maxRotation: 40, minRotation: 40 }, grid: { color: 'rgba(255,255,255,.05)' } },
+                y: { ticks: { color: 'rgba(232,239,255,.62)' }, grid: { color: 'rgba(255,255,255,.05)' } },
+                y1: { position: 'right', ticks: { color: 'rgba(255,224,178,.74)' }, grid: { drawOnChartArea: false } }
+            }
+        }
+    });
+}
+
+function buildChartData(rows){
+    return {
+        labels: rows.map(r => r.timestamp),
+        datasets: [
+            { label: 'Температура, °C', data: rows.map(r => r.temperature), borderColor: '#59b5ff', backgroundColor: 'rgba(89,181,255,.25)', tension: .34, fill: true, pointRadius: 2, pointHoverRadius: 4, yAxisID: 'y' },
+            { label: 'Влажность, %', data: rows.map(r => r.humidity), borderColor: '#ff7aa8', backgroundColor: 'rgba(255,122,168,.12)', tension: .34, fill: false, pointRadius: 2, pointHoverRadius: 4, yAxisID: 'y' },
+            { label: 'PM2.5, мкг/м³', data: rows.map(r => r.pm25), borderColor: '#ffb44c', backgroundColor: 'rgba(255,180,76,.12)', tension: .28, fill: false, pointRadius: 2, pointHoverRadius: 4, yAxisID: 'y1' },
+            { label: 'AQI', data: rows.map(r => r.aqi), borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,.12)', tension: .28, borderDash:[8,4], fill: false, pointRadius: 0, pointHoverRadius: 3, yAxisID: 'y1' }
+        ]
+    };
+}
+
+function updateChart(rows){
+    chart.data = buildChartData(rows);
+    chart.update();
+}
+
+function initMap(){
+    map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([43.2389, 76.8897], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    const legend = L.control({position:'bottomright'});
+    legend.onAdd = function(){
+        const div = L.DomUtil.create('div', 'legend-box');
+        div.innerHTML = `
+            <div class="fw-bold mb-1">PM2.5 / AQI</div>
+            <div class="legend-row"><span class="legend-dot" style="background:#22c55e"></span>0–12 — хорошо</div>
+            <div class="legend-row"><span class="legend-dot" style="background:#f59e0b"></span>12–35 — умеренно</div>
+            <div class="legend-row"><span class="legend-dot" style="background:#f97316"></span>35–55 — повышенно</div>
+            <div class="legend-row"><span class="legend-dot" style="background:#ef4444"></span>55–150 — вредно</div>
+            <div class="legend-row"><span class="legend-dot" style="background:#8b5cf6"></span>>150 — очень вредно</div>
+        `;
+        return div;
+    };
+    legend.addTo(map);
+
+    renderMap(initialMapPoints, initialRoutePoints, initialMapSummary, selectedMapMode);
+    setTimeout(() => map.invalidateSize(), 400);
+}
+
+function clearMapLayers(){
+    mapLayers.forEach(layer => map.removeLayer(layer));
+    mapLayers = [];
+}
+
+function fitMapToData(latlngs){
+    if(!latlngs.length) return;
+    const bounds = L.latLngBounds(latlngs);
+    map.fitBounds(bounds.pad(0.18), { maxZoom: 15 });
+}
+
+function createPinIcon(point){
+    const color = getColorByPm25(point.pm25);
+    const classes = point.is_latest ? 'map-pin latest' : 'map-pin';
+    const label = point.pm25 != null ? point.pm25 : '—';
+    return L.divIcon({
+        className: '',
+        html: `<div class="${classes}" style="background:${color}"><span>${label}</span></div>`,
+        iconSize: [74, 46],
+        iconAnchor: [37, 23],
+        popupAnchor: [0, -10]
+    });
+}
+
+function buildPopup(point){
+    return `
+        <div class="map-popup">
+            <b>Локация наблюдения</b><br>
+            Время: <b>${point.timestamp}</b><br>
+            PM2.5: <b>${point.pm25 ?? '—'}</b> мкг/м³<br>
+            AQI: <b>${point.aqi ?? '—'}</b><br>
+            Температура: <b>${point.temperature ?? '—'} °C</b><br>
+            Влажность: <b>${point.humidity ?? '—'} %</b>
+        </div>
+    `;
+}
+
+function renderMap(points, routePoints, summary, mode){
+    clearMapLayers();
+    const latlngs = [];
+
+    if(mode === 'pins'){
+        points.forEach(point => {
+            const marker = L.marker([point.latitude, point.longitude], { icon: createPinIcon(point) }).bindPopup(buildPopup(point));
+            mapLayers.push(marker);
+            marker.addTo(map);
+            latlngs.push([point.latitude, point.longitude]);
+        });
+    } else if(mode === 'zones'){
+        points.forEach(point => {
+            const color = getColorByPm25(point.pm25);
+            const circle = L.circle([point.latitude, point.longitude], {
+                radius: Math.max(40, Math.min(220, 50 + (point.radius || 30) * 4)),
+                color,
+                weight: point.is_latest ? 3 : 1.5,
+                fillColor: color,
+                fillOpacity: point.intensity || .28
+            }).bindPopup(buildPopup(point));
+            const label = L.marker([point.latitude, point.longitude], { icon: L.divIcon({ className:'', html:`<div class="map-pin ${point.is_latest ? 'latest' : ''}" style="background:${color}"><span>${point.pm25 ?? '—'}</span></div>`, iconSize:[74,46], iconAnchor:[37,23] }) }).bindPopup(buildPopup(point));
+            mapLayers.push(circle, label);
+            circle.addTo(map); label.addTo(map);
+            latlngs.push([point.latitude, point.longitude]);
+        });
+    } else if(mode === 'route'){
+        const coords = routePoints.map(p => [p.latitude, p.longitude]);
+        if(coords.length){
+            const poly = L.polyline(coords, { color:'#63e7d8', weight:4, opacity:.85, dashArray:'10 12' });
+            poly.addTo(map); mapLayers.push(poly);
+            coords.forEach((latlng, idx) => {
+                const p = routePoints[idx];
+                const color = getColorByPm25(p.pm25);
+                const circle = L.circleMarker(latlng, { radius: idx === coords.length - 1 ? 10 : 6, color:'#fff', weight:2, fillColor:color, fillOpacity:.9 })
+                    .bindPopup(`<div class="map-popup"><b>${idx === coords.length - 1 ? 'Последняя точка маршрута' : 'Точка маршрута'}</b><br>Время: <b>${p.timestamp}</b><br>PM2.5: <b>${p.pm25 ?? '—'}</b><br>Температура: <b>${p.temperature ?? '—'} °C</b><br>Влажность: <b>${p.humidity ?? '—'} %</b></div>`);
+                circle.addTo(map); mapLayers.push(circle);
+            });
+            latlngs.push(...coords);
+        }
+    }
+
+    if(locationTracking && latestLocationMarker){
+        mapLayers.push(latestLocationMarker);
+        latestLocationMarker.addTo(map);
+    }
+
+    if(latlngs.length) fitMapToData(latlngs);
+    updateMapSidebar(summary, mode);
+}
+
+function updateMapSidebar(summary, mode){
+    document.getElementById('map-generated-at').textContent = summary.generated_at || '—';
+    document.getElementById('map-max-pm25').textContent = summary.max_pm25 ?? '—';
+    document.getElementById('map-avg-pm25').textContent = summary.avg_pm25 ?? '—';
+    document.getElementById('map-last-coords').textContent = summary.last_coordinates ? `${summary.last_coordinates.latitude}, ${summary.last_coordinates.longitude}` : '—';
+    document.getElementById('map-mode-label').textContent = mode === 'pins' ? 'AQI-пины' : mode === 'zones' ? 'Тепловые зоны' : 'Траектория';
+}
+
+function setPill(el, className, text){
+    el.className = `pill ${className}`;
+    el.textContent = text;
+}
+
+function updateLiveUI(data){
+    const latest = data.latest || {};
+    const quality = data.air_quality || {};
+    const stats = data.stats || {};
+    const trend = data.trend || {};
+    const nowcast = data.nowcast || {};
+    const measurementState = data.measurement_state || {};
+    const status = data.system_status || {};
+    const spread = getSpreadMeta(stats.min_pm25, stats.max_pm25);
+
+    document.getElementById('status-dot').className = `status-dot status-${status.state || 'offline'}`;
+    document.getElementById('system-status-text').textContent = status.label || 'Нет данных';
+    document.getElementById('total-records').textContent = data.total_records ?? '—';
+    document.getElementById('last-update-freshness').textContent = status.freshness_text || 'нет данных';
+
+    document.getElementById('summary-date').textContent = latest.date_text || '—';
+    document.getElementById('summary-time').textContent = latest.time_text || '—';
+    document.getElementById('avg-pm25').textContent = stats.avg_pm25 ?? '—';
+    document.getElementById('records-24h').textContent = stats.records ?? '—';
+    document.getElementById('summary-pm1').textContent = latest.pm1 ?? '—';
+    document.getElementById('summary-pm25-live').textContent = latest.pm25 ?? '—';
+    document.getElementById('summary-pm10').textContent = latest.pm10 ?? '—';
+    document.getElementById('summary-session-duration').textContent = measurementState.measurement_enabled ? (measurementState.session_duration_text || '—') : 'неактивно';
+    document.getElementById('summary-session-samples').textContent = measurementState.session_sample_count ?? '—';
+    document.getElementById('aqi-value-inline').textContent = quality.aqi ?? '—';
+    setPill(document.getElementById('aqi-pill'), quality.class_name || 'pill-neutral', quality.short || 'Нет данных');
+
+    document.getElementById('temperature-value').textContent = latest.temperature ?? '—';
+    document.getElementById('humidity-value').textContent = latest.humidity ?? '—';
+    document.getElementById('pm25-value').textContent = latest.pm25 ?? '—';
+    setPill(document.getElementById('pm25-pill'), quality.class_name || 'pill-neutral', quality.short || 'Нет данных');
+
+    document.getElementById('aqi-number').textContent = quality.aqi ?? '—';
+    setPill(document.getElementById('aqi-short'), quality.class_name || 'pill-neutral', quality.short || 'Нет данных');
+    document.getElementById('aqi-caption').textContent = quality.label || 'Нет данных';
+    document.getElementById('aqi-recommendation').textContent = quality.recommendation || '—';
+
+    document.getElementById('trend-direction').textContent = trend.direction || '—';
+    document.getElementById('trend-delta').textContent = trend.delta ?? '—';
+    document.getElementById('forecast-pm25').textContent = trend.forecast_pm25 ?? '—';
+    document.getElementById('forecast-aqi').textContent = trend.forecast_aqi ?? '—';
+    setPill(document.getElementById('forecast-quality-pill'), trend.forecast_quality?.class_name || 'pill-neutral', trend.forecast_quality?.short || 'Нет данных');
+    document.getElementById('forecast-chip').textContent = trend.forecast_pm25 ?? '—';
+    document.getElementById('trend-chip').textContent = trend.direction || '—';
+
+    document.getElementById('nowcast-pm25').textContent = nowcast.pm25 ?? '—';
+    document.getElementById('nowcast-aqi').textContent = nowcast.aqi ?? '—';
+    setPill(document.getElementById('nowcast-quality'), nowcast.quality?.class_name || 'pill-neutral', nowcast.quality?.short || 'Нет данных');
+    document.getElementById('nowcast-method').textContent = nowcast.available ? (nowcast.method || 'NowCast') : 'Недостаточно данных для расчёта NowCast';
+
+    document.getElementById('spread-min').textContent = stats.min_pm25 ?? '—';
+    document.getElementById('spread-max').textContent = stats.max_pm25 ?? '—';
+    document.getElementById('spread-range').textContent = spread.range;
+    document.getElementById('spread-status-text').textContent = spread.text;
+    setPill(document.getElementById('spread-pill'), spread.className, spread.short);
+
+    document.getElementById('sensor-pm1').textContent = latest.pm1 ?? '—';
+    document.getElementById('sensor-pm10').textContent = latest.pm10 ?? '—';
+    document.getElementById('sensor-pc03').textContent = latest.pc0_3 ?? '—';
+    document.getElementById('sensor-pc05').textContent = latest.pc0_5 ?? '—';
+    document.getElementById('sensor-pc10').textContent = latest.pc1_0 ?? '—';
+    document.getElementById('sensor-pc25').textContent = latest.pc2_5 ?? '—';
+    document.getElementById('sensor-pc50').textContent = latest.pc5_0 ?? '—';
+    document.getElementById('sensor-pc100').textContent = latest.pc10 ?? '—';
+
+    const historyBody = document.getElementById('history-body');
+    historyBody.innerHTML = (data.recent || []).map(row => `
+        <tr>
+            <td>${row.date_text} ${row.time_text}</td>
+            <td>${row.temperature ?? '—'} °C</td>
+            <td>${row.humidity ?? '—'} %</td>
+            <td><span class="pill ${row.air_quality?.class_name || 'pill-neutral'}">${row.pm25 ?? '—'}</span></td>
+            <td><span class="pill ${row.stability?.class_name || 'pill-neutral'}">${row.stability?.short || 'нет данных'}</span></td>
+            <td>${(row.latitude && row.longitude) ? `${Number(row.latitude).toFixed(5)}, ${Number(row.longitude).toFixed(5)}` : '—'}</td>
+        </tr>
+    `).join('');
+}
+
+async function refreshLivePanel(){
+    try{
+        const response = await fetch('/api/live');
+        const data = await response.json();
+        updateLiveUI(data);
+    } catch (error){
+        console.error('Ошибка обновления панели', error);
+    }
+}
+
+async function refreshChart(){
+    const btn = document.getElementById('refresh-chart-btn');
+    setButtonLoading(btn, true);
+    try{
+        const response = await fetch(`/api/chart?limit=${selectedChartLimit}`);
+        const data = await response.json();
+        updateChart(data.chart || []);
+        document.getElementById('chart-generated-at').textContent = data.generated_at || '—';
+        document.getElementById('forecast-chip').textContent = data.trend?.forecast_pm25 ?? '—';
+        document.getElementById('trend-chip').textContent = data.trend?.direction ?? '—';
+        document.getElementById('forecast-pm25').textContent = data.trend?.forecast_pm25 ?? '—';
+        document.getElementById('forecast-aqi').textContent = data.trend?.forecast_aqi ?? '—';
+        setPill(document.getElementById('forecast-quality-pill'), data.trend?.forecast_quality?.class_name || 'pill-neutral', data.trend?.forecast_quality?.short || 'Нет данных');
+        document.getElementById('trend-direction').textContent = data.trend?.direction ?? '—';
+        document.getElementById('trend-delta').textContent = data.trend?.delta ?? '—';
+    } catch(error){
+        console.error('Ошибка обновления графика', error);
+    } finally {
+        setButtonLoading(btn, false);
+    }
+}
+
+async function refreshMap(){
+    const btn = document.getElementById('refresh-map-btn');
+    setButtonLoading(btn, true);
+    try{
+        const response = await fetch(`/api/map?period=${selectedMapPeriod}`);
+        const data = await response.json();
+        renderMap(data.map_points || [], data.route_points || [], data.map_summary || {}, selectedMapMode);
+    } catch(error){
+        console.error('Ошибка обновления карты', error);
+    } finally {
+        setButtonLoading(btn, false);
+    }
+}
+
+
+async function refreshLocationStatus(){
+    try{
+        const response = await fetch('/api/location-status');
+        const data = await response.json();
+        const statusText = document.getElementById('location-status-text');
+        const badge = document.getElementById('location-status-badge');
+        if(!statusText || !badge) return;
+
+        if(data.location_ready && data.latitude !== null && data.longitude !== null){
+            statusText.textContent = 'геолокация активна';
+            badge.classList.add('active');
+        } else {
+            statusText.textContent = 'геолокация не включена';
+            badge.classList.remove('active');
+        }
+    } catch(error){
+        console.error('Не удалось получить статус геолокации', error);
+    }
+}
+
+function updateLocationButton(state){
+    const btn = document.getElementById('location-btn');
+    const text = document.getElementById('location-btn-text');
+    btn.classList.remove('active');
+    if(state === 'idle'){
+        text.textContent = 'Геолокация';
+    } else if(state === 'requesting'){
+        btn.classList.add('active');
+        text.textContent = 'Доступ к гео…';
+    } else if(state === 'active'){
+        btn.classList.add('active');
+        text.textContent = 'Геолокация включена';
+    } else if(state === 'disabled'){
+        text.textContent = 'Геолокация выключена';
+        setTimeout(() => { if(!locationTracking) text.textContent = 'Геолокация'; }, 1300);
+    }
+}
+
+async function sendLocationToServer(lat, lon){
+    try{
+        await fetch('/update_location', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ latitude: lat, longitude: lon })
+        });
+    } catch(error){
+        console.error('Не удалось отправить геолокацию', error);
+    }
+}
+
+function updateCurrentLocationMarker(lat, lon){
+    if(latestLocationMarker){
+        latestLocationMarker.setLatLng([lat, lon]);
+    } else {
+        latestLocationMarker = L.circleMarker([lat, lon], {
+            radius: 10, color: '#fff', weight: 3, fillColor: '#63e7d8', fillOpacity: .92
+        }).bindPopup('<b>Ваше текущее местоположение</b>');
+    }
+    if(locationTracking){
+        latestLocationMarker.addTo(map);
+    }
+}
+
+function toggleLocationTracking(){
+    if(locationTracking){
+        if(watchId) navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+        locationTracking = false;
+        if(latestLocationMarker && map.hasLayer(latestLocationMarker)) map.removeLayer(latestLocationMarker);
+        updateLocationButton('disabled');
+        return;
+    }
+
+    if(!navigator.geolocation){
+        alert('Геолокация не поддерживается браузером');
+        return;
+    }
+
+    updateLocationButton('requesting');
+    watchId = navigator.geolocation.watchPosition(async (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        locationTracking = true;
+        updateLocationButton('active');
+        updateCurrentLocationMarker(lat, lon);
+        await sendLocationToServer(lat, lon);
+    }, (err) => {
+        console.error(err);
+        locationTracking = false;
+        updateLocationButton('idle');
+        alert('Не удалось получить местоположение');
+    }, { enableHighAccuracy: true, maximumAge: 8000, timeout: 15000 });
+}
+
+function wireControls(){
+    document.getElementById('refresh-chart-btn').addEventListener('click', refreshChart);
+    document.getElementById('refresh-map-btn').addEventListener('click', refreshMap);
+    document.getElementById('location-btn').addEventListener('click', toggleLocationTracking);
+
+    document.querySelectorAll('#chart-limit-switcher .action-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            selectedChartLimit = Number(btn.dataset.limit);
+            updateActiveSwitcher('chart-limit-switcher', selectedChartLimit, 'limit');
+            refreshChart();
+        });
+    });
+
+    document.querySelectorAll('#map-mode-switcher .action-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            selectedMapMode = btn.dataset.mode;
+            updateActiveSwitcher('map-mode-switcher', selectedMapMode, 'mode');
+            refreshMap();
+        });
+    });
+
+    document.querySelectorAll('#map-period-switcher .action-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            selectedMapPeriod = btn.dataset.period;
+            updateActiveSwitcher('map-period-switcher', selectedMapPeriod, 'period');
+            refreshMap();
+        });
+    });
+}
+
+window.addEventListener('load', () => {
+    initChart(initialChartRows);
+    initMap();
+    wireControls();
+    refreshLocationStatus();
+    setInterval(refreshLivePanel, 15000);
+    setInterval(refreshLocationStatus, 5000);
+});
+</script>
+</body>
+</html>
