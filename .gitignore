@@ -53,12 +53,3 @@ Desktop.ini
 *.temp
 *.bak
 *.swp
-
-# AirMonitor v2 local environment and test cache
-backend/.venv/
-backend/.pytest_cache/
-
-.venv/
-.pytest_cache/
-__pycache__/
-*.py[cod]
