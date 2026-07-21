@@ -13,13 +13,30 @@ The repository currently contains:
 AirMonitor v1 must remain functional and must not be rewritten during the
 initial AirMonitor v2 migration.
 
+
 ## Current task scope
 
-For the `feature/v2-bootstrap` branch, work only inside the `backend/`
-directory, except when creating or updating agent-specific documentation.
+For the `feature/app-configuration` branch, implement only the centralized
+application configuration layer for AirMonitor v2.
+
+Allowed changes:
+
+- `AGENTS.md`
+- `.gitignore`, only when required for safe environment-file handling
+- files inside `backend/`
+
+Required work:
+
+- add centralized settings using `pydantic-settings`;
+- add a public `backend/.env.example` template;
+- keep the real `backend/.env` ignored;
+- use settings for FastAPI metadata and the health response;
+- add automated configuration tests;
+- preserve the existing `/health` public response contract.
 
 Do not implement PostgreSQL, SQLAlchemy, Alembic, Docker, authentication,
-Redis, MQTT, or frontend migration during this task.
+Redis, MQTT, frontend migration, or new business API endpoints during this
+task.
 
 ## Protected legacy files
 
@@ -90,3 +107,21 @@ Create the backend environment from the repository root:
 
 ```powershell
 py -3.13 -m venv backend/.venv
+
+## Definition of done
+
+Sprint 2 is complete when:
+
+1. Application settings are defined in `backend/app/core/config.py`.
+2. Settings use `pydantic-settings`.
+3. Environment variables use the `AIRMONITOR_` prefix.
+4. A safe `backend/.env.example` exists.
+5. The real `backend/.env` is ignored by Git.
+6. FastAPI title, version, and debug mode come from settings.
+7. The `/health` response uses configured service name and version.
+8. Existing health behavior remains backward compatible.
+9. Tests verify default settings and environment-variable overrides.
+10. All tests pass.
+11. No AirMonitor v1 file is modified.
+12. No secret or private local file is committed.
+13. Codex does not commit or push changes.
