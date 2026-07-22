@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 from pytest import MonkeyPatch
+from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
@@ -156,9 +157,9 @@ async def test_database_dependency_closes_session() -> None:
         await engine.dispose()
 
 
-def test_declarative_base_has_empty_metadata() -> None:
-    assert Base.metadata is not None
-    assert not Base.metadata.tables
+def test_declarative_base_owns_metadata_registry() -> None:
+    assert isinstance(Base.metadata, MetaData)
+    assert Base.registry.metadata is Base.metadata
 
 
 def test_alembic_configuration_files_exist() -> None:
@@ -175,5 +176,9 @@ def test_alembic_uses_application_settings_and_base_metadata() -> None:
     ).read_text(encoding="utf-8")
 
     assert "get_settings()" in environment_source
+    assert "import app.db.models" in environment_source
     assert "target_metadata = Base.metadata" in environment_source
+    assert environment_source.index("import app.db.models") < (
+        environment_source.index("target_metadata = Base.metadata")
+    )
     assert '.replace("%", "%%")' in environment_source
