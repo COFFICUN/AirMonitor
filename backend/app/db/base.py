@@ -4,4 +4,4 @@ from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
-    """Base class for future AirMonitor ORM models."""
+    """Base class for AirMonitor ORM models."""
