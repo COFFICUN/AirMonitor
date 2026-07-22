@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +20,21 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     debug: bool = False
     api_prefix: str = "/api/v1"
+    database_url: str = (
+        "postgresql+asyncpg://airmonitor:airmonitor@localhost:5432/airmonitor"
+    )
+    database_echo: bool = False
+    database_pool_pre_ping: bool = True
+
+    @field_validator("database_url")
+    @classmethod
+    def validate_database_url(cls, value: str) -> str:
+        """Restrict database access to the configured asynchronous driver."""
+        if not value.startswith("postgresql+asyncpg://"):
+            raise ValueError(
+                "database_url must use the postgresql+asyncpg driver"
+            )
+        return value
 
     model_config = SettingsConfigDict(
         env_prefix="AIRMONITOR_",
