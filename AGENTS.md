@@ -16,27 +16,31 @@ initial AirMonitor v2 migration.
 
 ## Current task scope
 
-For the `feature/app-configuration` branch, implement only the centralized
-application configuration layer for AirMonitor v2.
+For the `feature/database-foundation` branch, implement only the database
+infrastructure foundation for AirMonitor v2.
 
 Allowed changes:
 
 - `AGENTS.md`
-- `.gitignore`, only when required for safe environment-file handling
+- `.gitignore`, only if required for database-related local files
 - files inside `backend/`
 
 Required work:
 
-- add centralized settings using `pydantic-settings`;
-- add a public `backend/.env.example` template;
-- keep the real `backend/.env` ignored;
-- use settings for FastAPI metadata and the health response;
-- add automated configuration tests;
-- preserve the existing `/health` public response contract.
+- add PostgreSQL database configuration;
+- add SQLAlchemy 2 asynchronous engine infrastructure;
+- add an asynchronous session factory;
+- add a FastAPI dependency that yields database sessions;
+- add a typed declarative ORM base;
+- initialize Alembic with its asynchronous template;
+- configure Alembic from application settings;
+- add automated tests that do not require a running PostgreSQL server;
+- preserve all existing application and health endpoint behavior.
 
-Do not implement PostgreSQL, SQLAlchemy, Alembic, Docker, authentication,
-Redis, MQTT, frontend migration, or new business API endpoints during this
-task.
+Do not implement database tables, ORM domain models, migration revisions,
+CRUD services, measurement endpoints, Docker, authentication, Redis, MQTT,
+frontend migration, or data transfer from the legacy SQLite database during
+this task.
 
 ## Protected legacy files
 
@@ -110,18 +114,26 @@ py -3.13 -m venv backend/.venv
 
 ## Definition of done
 
-Sprint 2 is complete when:
+Sprint 3 is complete when:
 
-1. Application settings are defined in `backend/app/core/config.py`.
-2. Settings use `pydantic-settings`.
-3. Environment variables use the `AIRMONITOR_` prefix.
-4. A safe `backend/.env.example` exists.
-5. The real `backend/.env` is ignored by Git.
-6. FastAPI title, version, and debug mode come from settings.
-7. The `/health` response uses configured service name and version.
-8. Existing health behavior remains backward compatible.
-9. Tests verify default settings and environment-variable overrides.
-10. All tests pass.
-11. No AirMonitor v1 file is modified.
-12. No secret or private local file is committed.
-13. Codex does not commit or push changes.
+1. PostgreSQL configuration is defined through the existing Settings class.
+2. The public `.env.example` contains only safe example database values.
+3. SQLAlchemy uses an asynchronous PostgreSQL engine with asyncpg.
+4. Engine and session-factory construction are separated into testable
+   functions.
+5. The session factory creates typed AsyncSession instances.
+6. FastAPI has a reusable dependency that yields and closes a database session.
+7. A typed SQLAlchemy DeclarativeBase exists.
+8. Alembic is initialized with an asynchronous environment.
+9. Alembic reads the database URL from application settings rather than storing
+   a real credential in `alembic.ini`.
+10. Alembic uses the declarative base metadata for future autogeneration.
+11. No database tables or domain models are created.
+12. No migration revision is generated.
+13. Tests do not require a live PostgreSQL server.
+14. All existing tests remain passing.
+15. `pip check`, `git diff --check`, and Git scope verification pass.
+16. No AirMonitor v1 file is modified.
+17. No real database password, `.env`, database dump, certificate, or secret is
+    created or committed.
+18. Codex does not commit, push, switch branches, reset, or clean Git.

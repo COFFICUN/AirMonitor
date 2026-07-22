@@ -16,6 +16,9 @@ ENVIRONMENT_VARIABLES = (
     "AIRMONITOR_ENVIRONMENT",
     "AIRMONITOR_DEBUG",
     "AIRMONITOR_API_PREFIX",
+    "AIRMONITOR_DATABASE_URL",
+    "AIRMONITOR_DATABASE_ECHO",
+    "AIRMONITOR_DATABASE_POOL_PRE_PING",
 )
 
 
@@ -36,6 +39,11 @@ def test_settings_defaults(monkeypatch: MonkeyPatch) -> None:
     assert settings.environment == "development"
     assert settings.debug is False
     assert settings.api_prefix == "/api/v1"
+    assert settings.database_url == (
+        "postgresql+asyncpg://airmonitor:airmonitor@localhost:5432/airmonitor"
+    )
+    assert settings.database_echo is False
+    assert settings.database_pool_pre_ping is True
 
 
 def test_settings_environment_variable_overrides(monkeypatch: MonkeyPatch) -> None:
