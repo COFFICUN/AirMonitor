@@ -16,31 +16,77 @@ initial AirMonitor v2 migration.
 
 ## Current task scope
 
-For the `feature/database-foundation` branch, implement only the database
-infrastructure foundation for AirMonitor v2.
+For the `feature/domain-models` branch, implement only the SQLAlchemy ORM
+domain models for AirMonitor v2.
+
+The legacy Flask and SQLite implementation has already been audited. It is
+read-only reference material and must not be modified.
 
 Allowed changes:
 
 - `AGENTS.md`
-- `.gitignore`, only if required for database-related local files
 - files inside `backend/`
+
+Legacy files such as `app.py`, `sensor_data.db`, `index.html`, firmware files,
+certificates, and other AirMonitor v1 files may be inspected but must not be
+modified.
 
 Required work:
 
-- add PostgreSQL database configuration;
-- add SQLAlchemy 2 asynchronous engine infrastructure;
-- add an asynchronous session factory;
-- add a FastAPI dependency that yields database sessions;
-- add a typed declarative ORM base;
-- initialize Alembic with its asynchronous template;
-- configure Alembic from application settings;
-- add automated tests that do not require a running PostgreSQL server;
-- preserve all existing application and health endpoint behavior.
+- implement the approved AirMonitor v2 relational domain model;
+- use typed SQLAlchemy 2 declarative mappings;
+- define columns, primary keys, foreign keys, relationships, constraints,
+  indexes, defaults, nullability, and delete behavior explicitly;
+- register every model in `Base.metadata`;
+- add automated tests for the complete metadata structure;
+- preserve all existing application behavior and tests.
 
-Do not implement database tables, ORM domain models, migration revisions,
-CRUD services, measurement endpoints, Docker, authentication, Redis, MQTT,
-frontend migration, or data transfer from the legacy SQLite database during
-this task.
+Approved AirMonitor v2 entities:
+
+- `devices`;
+- `device_runtime_state`;
+- `measurement_sessions`;
+- `raw_measurements`.
+
+Approved schema simplifications:
+
+- do not recreate the obsolete legacy `measurements` table;
+- do not recreate `raw_session_links`;
+- store `session_id` directly in `raw_measurements`;
+- do not recreate `aggregated_measurements` during this sprint;
+- aggregated time-series storage will be designed later if it becomes
+  necessary.
+
+Important design requirements:
+
+- `DeviceRuntimeState` is a one-to-one child of `Device`;
+- `MeasurementSession` belongs to one `Device`;
+- `RawMeasurement` belongs to one `Device` and one `MeasurementSession`;
+- an active session has `ended_at = NULL`;
+- all timestamps are timezone-aware;
+- `measured_at` and `received_at` are separate fields;
+- runtime `last_seen_at` and `location_updated_at` are separate fields;
+- devices are deactivated through `is_active` rather than normally deleted;
+- historical measurements must be protected from accidental cascading deletion;
+- future duplicate protection must be supported through a nullable
+  `source_message_id`;
+- no engine or database connection may be created during model import.
+
+Do not implement:
+
+- Alembic migration revisions;
+- PostgreSQL table creation;
+- PostgreSQL provisioning;
+- CRUD repositories;
+- service-layer logic;
+- FastAPI routes;
+- Pydantic API schemas;
+- device authentication;
+- AQI or NowCast calculations;
+- legacy data migration;
+- Docker;
+- frontend changes;
+- firmware changes.
 
 ## Protected legacy files
 
@@ -114,26 +160,42 @@ py -3.13 -m venv backend/.venv
 
 ## Definition of done
 
-Sprint 3 is complete when:
+Sprint 4 is complete when:
 
-1. PostgreSQL configuration is defined through the existing Settings class.
-2. The public `.env.example` contains only safe example database values.
-3. SQLAlchemy uses an asynchronous PostgreSQL engine with asyncpg.
-4. Engine and session-factory construction are separated into testable
-   functions.
-5. The session factory creates typed AsyncSession instances.
-6. FastAPI has a reusable dependency that yields and closes a database session.
-7. A typed SQLAlchemy DeclarativeBase exists.
-8. Alembic is initialized with an asynchronous environment.
-9. Alembic reads the database URL from application settings rather than storing
-   a real credential in `alembic.ini`.
-10. Alembic uses the declarative base metadata for future autogeneration.
-11. No database tables or domain models are created.
-12. No migration revision is generated.
-13. Tests do not require a live PostgreSQL server.
-14. All existing tests remain passing.
-15. `pip check`, `git diff --check`, and Git scope verification pass.
-16. No AirMonitor v1 file is modified.
-17. No real database password, `.env`, database dump, certificate, or secret is
-    created or committed.
-18. Codex does not commit, push, switch branches, reset, or clean Git.
+1. Four SQLAlchemy ORM models are implemented:
+   `Device`, `DeviceRuntimeState`, `MeasurementSession`, and
+   `RawMeasurement`.
+2. `Base.metadata` contains exactly four domain tables:
+   `devices`, `device_runtime_state`, `measurement_sessions`, and
+   `raw_measurements`.
+3. Models use SQLAlchemy 2 `Mapped`, `mapped_column`, and `relationship`.
+4. Primary keys, foreign keys, nullability, defaults, indexes, unique
+   constraints, and check constraints are explicitly defined.
+5. `DeviceRuntimeState` is enforced as a one-to-one relationship with
+   `Device`.
+6. `RawMeasurement.session_id` directly references
+   `measurement_sessions.id`.
+7. The obsolete `measurements`, `raw_session_links`, and
+   `aggregated_measurements` tables are not recreated.
+8. Timestamp fields use timezone-aware SQLAlchemy types.
+9. Active sessions support `ended_at = NULL`.
+10. `measured_at` and `received_at` are separate.
+11. `last_seen_at` and `location_updated_at` are separate.
+12. Check constraints cover humidity, temperature, particle values,
+    coordinates, session dates, and sample counts.
+13. Indexes support the expected device, session, and timestamp queries.
+14. Historical measurements are protected from accidental cascading deletion.
+15. Importing models does not create an engine, session, network connection,
+    or database connection.
+16. Automated tests verify tables, columns, keys, constraints, indexes,
+    relationships, timestamp types, and import side effects.
+17. All existing backend tests remain passing.
+18. No Alembic revision is created.
+19. No PostgreSQL database, schema, table, user, or role is created or modified.
+20. `pip check`, `compileall`, `alembic history`, `alembic heads`,
+    `git diff --check`, scope checks, and secret checks pass.
+21. No AirMonitor v1 file is modified.
+22. No `.env`, database, dump, certificate, private key, credential, or secret
+    is created or committed.
+23. Codex does not stage, commit, push, switch branches, reset, restore, or
+    clean Git.
