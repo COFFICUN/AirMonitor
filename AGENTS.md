@@ -16,15 +16,24 @@ initial AirMonitor v2 migration.
 
 ## Current task scope
 
-For the `feature/persistence-services` branch, implement only the transactional
-persistence layer for the approved AirMonitor v2 PostgreSQL domain model.
+For the `feature/device-measurement-api` branch, implement only the versioned
+REST API layer for the approved AirMonitor v2 device, session, and raw
+measurement workflow.
 
-The approved tables are:
+The existing Sprint 6 repositories and transactional services are the approved
+business-logic layer. API routes must use those services and must not duplicate
+their business rules.
 
-- `devices`;
-- `device_runtime_state`;
-- `measurement_sessions`;
-- `raw_measurements`.
+Approved endpoints:
+
+- `POST /api/v1/devices`;
+- `GET /api/v1/devices/{device_id}`;
+- `PATCH /api/v1/devices/{device_id}/status`;
+- `POST /api/v1/devices/{device_id}/sessions`;
+- `GET /api/v1/devices/{device_id}/sessions/active`;
+- `POST /api/v1/devices/{device_id}/sessions/active/complete`;
+- `POST /api/v1/devices/{device_id}/sessions/active/cancel`;
+- `POST /api/v1/devices/{device_id}/measurements`.
 
 Allowed changes:
 
@@ -34,76 +43,60 @@ Allowed changes:
 Legacy AirMonitor v1 files are read-only reference material and must not be
 modified.
 
-Required work:
+Required architecture:
 
-- implement asynchronous SQLAlchemy repositories;
-- implement transaction-safe application services;
-- preserve the existing ORM models and initial Alembic migration;
-- use the existing AsyncSession infrastructure;
-- repositories must never commit transactions;
-- service methods must define transaction boundaries;
-- use row-level locking where required to prevent concurrent session-state
-  conflicts;
-- create a device and its runtime state in one transaction;
-- start, complete, and cancel measurement sessions safely;
-- allow at most one active session per device through service logic and row
-  locking;
-- record raw measurements only for an active session belonging to the same
-  device;
-- support optional source-message idempotency;
-- update session sample_count and device last_seen_at atomically with a raw
-  measurement;
-- provide explicit domain exceptions;
-- add unit and PostgreSQL integration tests;
-- preserve all existing 61 tests.
+- preserve the current FastAPI application and `/health` endpoint;
+- register all new routes under `/api/v1`;
+- use separate Pydantic request and response schemas;
+- configure request schemas to reject unknown fields;
+- configure ORM response schemas to read scalar model attributes safely;
+- use explicit response models and status codes;
+- add dependency providers for sessions, services, and read-only query
+  services;
+- create one AsyncSession per HTTP request;
+- session dependencies must yield and close sessions but must not commit or
+  roll back successful service operations;
+- write routes must call the existing Sprint 6 services directly without
+  performing preliminary database queries;
+- read routes must use read-only query services rather than repositories
+  directly;
+- query services must not commit, roll back, open write transactions, or use
+  row-level locks;
+- routes must not contain SQLAlchemy statements, transaction management, or
+  business-state checks;
+- centralize domain-exception to HTTP-response mapping;
+- centralize FastAPI request-validation error formatting;
+- do not expose SQL, table names, connection URLs, credentials, tracebacks, or
+  raw IntegrityError messages;
+- preserve the existing Sprint 6 duplicate-source behavior:
+  duplicate non-null source_message_id values produce
+  DuplicateSourceMessageError;
+- preserve all existing repository and service behavior.
 
-Repositories may use `flush()` but must not call:
+Approved HTTP status behavior:
 
-- `commit()`;
-- `rollback()`;
-- `begin()`.
+- successful resource creation: `201 Created`;
+- successful read or state transition: `200 OK`;
+- invalid request body, path, or query data: `422 Unprocessable Entity`;
+- missing device or active session: `404 Not Found`;
+- duplicate device UID: `409 Conflict`;
+- inactive device: `409 Conflict`;
+- existing active session: `409 Conflict`;
+- duplicate source message: `409 Conflict`;
+- invalid session transition or timestamp: `409 Conflict`;
+- missing runtime state or another broken internal invariant: safe
+  `500 Internal Server Error` without internal details.
 
-Service methods may manage transactions using the supplied AsyncSession.
+Approved error envelope:
 
-Do not implement:
-
-- FastAPI routes;
-- request or response schemas;
-- HTTP error mapping;
-- authentication or API keys;
-- AQI or NowCast calculations;
-- session summary averages;
-- CSV export;
-- SQLite data migration;
-- frontend;
-- firmware;
-- Docker;
-- background workers;
-- additional database tables;
-- additional Alembic revisions;
-- changes to the approved ORM schema.
-
-Live PostgreSQL integration verification is permitted only against a new
-disposable local database whose name starts with
-`airmonitor_persistence_test_`.
-
-Before every live PostgreSQL write operation, Codex must request explicit
-permission for the exact command.
-
-The local `airmonitor` database must not be modified during Sprint 6.
-  
-## Protected legacy files
-
-Do not modify these AirMonitor v1 files:
-
-- `app.py`
-- `index.html`
-- `test1_final.ino`
-- `init_db.py`
-- `schema.sql`
-- root `requirements.txt`
-- `secrets.example.h`
-
+```json
+{
+  "error": {
+    "code": "stable_machine_readable_code",
+    "message": "Safe human-readable message.",
+    "details": null
+  }
+}
 ## Sensitive files
 
 Never open, read, display, copy, modify, or include content from:
@@ -189,36 +182,53 @@ py -3.13 -m venv backend/.venv
 
 ## Definition of done
 
-Sprint 6 is complete when:
+Sprint 7 is complete when:
 
-1. Repository classes exist for devices, runtime state, sessions, and raw
-   measurements.
-2. Repository methods use AsyncSession and SQLAlchemy 2.x statements.
-3. Repositories never commit, rollback, or open transactions.
-4. Service methods own transaction boundaries.
-5. Creating a device also creates its runtime state atomically.
-6. Starting a session updates runtime state atomically.
-7. Starting a second active session for the same device is rejected.
-8. Completing a session sets status, ended_at, disables measurement, and clears
-   active_session_id atomically.
-9. Cancelling a session performs the equivalent consistent state transition.
-10. Raw measurements require an active session for the same device.
-11. Duplicate non-null source_message_id values are handled idempotently or
-    rejected with an explicit domain exception.
-12. Recording a measurement increments sample_count and updates last_seen_at in
-    the same transaction.
-13. Inactive devices cannot start sessions or record measurements.
-14. Missing devices and sessions produce explicit domain exceptions.
-15. Concurrent session operations use appropriate row-level locking.
-16. Unit tests cover repository statements and service behavior.
-17. PostgreSQL integration tests pass against a disposable local database.
-18. Integration tests cover successful and rejected state transitions.
-19. The disposable database is removed after verification.
-20. The local `airmonitor` database is not modified.
-21. No new Alembic revision is created.
-22. All existing backend tests remain passing.
-23. `pip check`, `compileall`, and `git diff --check` pass.
-24. No legacy, secret, `.env`, certificate, key, database, or dump file is
-    modified or committed.
-25. Codex performs no Git staging, commit, push, reset, restore, clean, or branch
-    operation.
+1. All eight approved `/api/v1` endpoints exist.
+2. The existing `/health` endpoint still works.
+3. Request and response Pydantic schemas are separated.
+4. Unknown request fields are rejected.
+5. Path device IDs must be positive.
+6. Coordinate limits and coordinate-pair rules are enforced.
+7. Naive datetime values are rejected.
+8. Decimal-backed values have stable tested JSON representations.
+9. Every endpoint declares an explicit response model.
+10. Creation endpoints return 201.
+11. Read and transition endpoints return 200.
+12. Write routes use Sprint 6 services.
+13. Read routes use read-only query services.
+14. Routes contain no SQLAlchemy statements.
+15. Routes contain no transaction management.
+16. Routes do not call repositories directly.
+17. One AsyncSession is created per request.
+18. Session dependencies do not automatically commit service operations.
+19. Domain exceptions are mapped centrally.
+20. Validation errors use the approved error envelope.
+21. Expected 404, 409, and 422 responses are represented in OpenAPI.
+22. Internal database details are never returned to clients.
+23. Application import performs no database connection.
+24. Application startup performs no migration or metadata creation.
+25. Offline route tests use dependency overrides and no PostgreSQL.
+26. OpenAPI generation is tested.
+27. The current backend baseline remains passing.
+28. The guarded PostgreSQL HTTP integration suite passes.
+29. The integration suite uses only AIRMONITOR_API_TEST_DATABASE_URL.
+30. The full HTTP lifecycle passes on a disposable database.
+31. Duplicate device, inactive device, second session, duplicate measurement,
+    invalid request, completion, cancellation, and post-completion rejection
+    are covered.
+32. Persisted rows and rollback behavior are verified.
+33. The disposable database is removed after verification.
+34. The protected `airmonitor` database is not connected to or modified.
+35. ORM models are unchanged.
+36. Existing repositories and transactional services are unchanged unless a
+    separately approved blocking defect is found.
+37. No Alembic revision is created.
+38. Alembic remains at sole head a4f9c2e7d1b6.
+39. pip check passes.
+40. compileall passes.
+41. git diff --check passes.
+42. Scope, generated-file, revision-count, and secret audits pass.
+43. Legacy files, frontend, firmware, `.env`, certificates, keys, databases,
+    and dumps are not modified or committed.
+44. Codex performs no Git write operation.
