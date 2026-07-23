@@ -119,6 +119,31 @@ database contents, or local secrets.
 - Add meaningful docstrings only where they explain design intent.
 - Do not add trivial comments that repeat the code.
 
+Migration safety workflow:
+
+- follow a strict test-first workflow;
+- create migration tests before creating the initial revision;
+- record the expected failing test run caused by the missing revision;
+- implement the revision only after the expected failure;
+- complete all unit, metadata, offline SQL, scope, and secret checks before any
+  live PostgreSQL operation;
+- after all offline checks pass, validate the migration against a disposable
+  local PostgreSQL database;
+- the disposable database name must start with
+  `airmonitor_migration_test_`;
+- perform upgrade, schema inspection, downgrade, and repeated upgrade only
+  against the disposable database;
+- delete only the disposable database after successful verification;
+- after disposable-database verification succeeds, apply `upgrade head` to the
+  local `airmonitor` development database;
+- before applying the migration, verify that the target host is localhost or
+  127.0.0.1 and that the target database name is exactly `airmonitor`;
+- stop without modifying the target if it contains unexpected tables, data, or
+  an incompatible Alembic state;
+- never downgrade, drop, truncate, or recreate the local `airmonitor`
+  development database;
+- never connect to a remote or production PostgreSQL server.
+
 ## Git safety
 
 Do not:
@@ -173,3 +198,22 @@ Sprint 5 is complete when:
     created or committed.
 19. Codex does not stage, commit, push, switch branches, reset, restore, clean,
     stamp, upgrade, or downgrade a live database.
+20. The initial migration tests were run before the revision existed and
+    failed for the expected missing-revision reason.
+21. All offline tests and SQL-generation checks passed before any live
+    PostgreSQL operation.
+22. A disposable local PostgreSQL database was used for an
+    upgrade-downgrade-upgrade integration cycle.
+23. The disposable database schema was inspected and matched the approved ORM
+    metadata.
+24. Only the disposable test database was dropped.
+25. The local target was verified as localhost/127.0.0.1 and database
+    `airmonitor`.
+26. The target database was confirmed safe and empty before migration.
+27. `alembic upgrade head` was successfully applied to the local development
+    database.
+28. `alembic current` reports the initial revision.
+29. The local development database contains the four approved domain tables
+    and `alembic_version`.
+30. No live downgrade or destructive operation was performed against the
+    local `airmonitor` database.
