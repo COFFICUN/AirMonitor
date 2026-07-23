@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI
 
+from app.api.errors import install_exception_handlers
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 
@@ -15,6 +16,7 @@ def create_application(settings: Settings | None = None) -> FastAPI:
         debug=application_settings.debug,
     )
     application.state.settings = application_settings
+    install_exception_handlers(application)
 
     def resolve_application_settings() -> Settings:
         return application_settings

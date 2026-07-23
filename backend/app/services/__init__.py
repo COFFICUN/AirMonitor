@@ -2,6 +2,15 @@
 
 from app.services.device import DeviceService
 from app.services.measurement import MeasurementService
+from app.services.queries import (
+    ActiveSessionQueryService,
+    DeviceQueryService,
+)
 
 
-__all__ = ["DeviceService", "MeasurementService"]
+__all__ = [
+    "ActiveSessionQueryService",
+    "DeviceQueryService",
+    "DeviceService",
+    "MeasurementService",
+]
