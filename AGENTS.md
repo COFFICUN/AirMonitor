@@ -16,14 +16,14 @@ initial AirMonitor v2 migration.
 
 ## Current task scope
 
-For the `feature/initial-schema-migration` branch, implement only the initial
-Alembic schema migration for the approved AirMonitor v2 SQLAlchemy models.
+For the `feature/persistence-services` branch, implement only the transactional
+persistence layer for the approved AirMonitor v2 PostgreSQL domain model.
 
-The approved ORM model contains exactly four domain tables:
+The approved tables are:
 
 - `devices`;
-- `measurement_sessions`;
 - `device_runtime_state`;
+- `measurement_sessions`;
 - `raw_measurements`.
 
 Allowed changes:
@@ -36,93 +36,61 @@ modified.
 
 Required work:
 
-- create exactly one initial Alembic revision;
-- create the four approved tables in dependency-safe order;
-- reproduce the approved ORM column types, nullability, server defaults,
-  primary keys, foreign keys, unique constraints, check constraints, and
-  indexes;
-- use explicit stable names for all constraints and indexes;
-- implement a complete reversible downgrade;
-- add automated migration-structure and offline-SQL tests;
-- verify upgrade and downgrade SQL without connecting to PostgreSQL;
-- preserve all existing application and model tests.
+- implement asynchronous SQLAlchemy repositories;
+- implement transaction-safe application services;
+- preserve the existing ORM models and initial Alembic migration;
+- use the existing AsyncSession infrastructure;
+- repositories must never commit transactions;
+- service methods must define transaction boundaries;
+- use row-level locking where required to prevent concurrent session-state
+  conflicts;
+- create a device and its runtime state in one transaction;
+- start, complete, and cancel measurement sessions safely;
+- allow at most one active session per device through service logic and row
+  locking;
+- record raw measurements only for an active session belonging to the same
+  device;
+- support optional source-message idempotency;
+- update session sample_count and device last_seen_at atomically with a raw
+  measurement;
+- provide explicit domain exceptions;
+- add unit and PostgreSQL integration tests;
+- preserve all existing 61 tests.
 
-The initial revision must be handwritten or carefully completed from the
-approved ORM metadata.
+Repositories may use `flush()` but must not call:
 
-Do not use Alembic autogenerate because no live database is available during
-the Codex task.
+- `commit()`;
+- `rollback()`;
+- `begin()`.
+
+Service methods may manage transactions using the supplied AsyncSession.
 
 Do not implement:
 
-- application repositories or services;
-- FastAPI endpoints;
-- Pydantic API schemas;
-- device authentication;
-- data seeding;
+- FastAPI routes;
+- request or response schemas;
+- HTTP error mapping;
+- authentication or API keys;
+- AQI or NowCast calculations;
+- session summary averages;
+- CSV export;
 - SQLite data migration;
+- frontend;
+- firmware;
 - Docker;
-- frontend or firmware changes;
-- AQI or NowCast logic;
-- additional tables;
-- PostgreSQL extensions;
-- triggers;
-- production deployment.
+- background workers;
+- additional database tables;
+- additional Alembic revisions;
+- changes to the approved ORM schema.
 
-### Gate B and Gate C: guarded local PostgreSQL verification
-
-Gate A is complete when the initial revision, migration tests, full backend
-tests, and offline upgrade and downgrade SQL checks pass.
-
-After Gate A has passed, Codex may perform guarded live verification only
-against the local PostgreSQL server.
-
-Allowed operations:
-
-- connect only to `localhost` or `127.0.0.1`;
-- use credentials supplied through the process environment;
-- perform read-only PostgreSQL preflight checks;
-- create one new disposable database whose name starts with
-  `airmonitor_migration_test_`;
-- apply `alembic upgrade head` to the disposable database;
-- inspect its tables, columns, constraints, indexes, and Alembic state;
-- run transaction-safe data-integrity tests against the disposable database;
-- run `alembic downgrade base` only against the disposable database;
-- apply `alembic upgrade head` to the disposable database again;
-- drop only the disposable database after successful verification;
-- after disposable-database verification passes, inspect the local database
-  named exactly `airmonitor`;
-- apply `alembic upgrade head` to the local `airmonitor` database only when it
-  is confirmed empty and compatible;
-- perform read-only schema and row-count checks after the migration.
+Live PostgreSQL integration verification is permitted only against a new
+disposable local database whose name starts with
+`airmonitor_persistence_test_`.
 
 Before every live PostgreSQL write operation, Codex must request explicit
 permission for the exact command.
 
-Codex must stop without making changes if:
-
-- the PostgreSQL host is not `localhost` or `127.0.0.1`;
-- authentication fails;
-- the target database name is not exactly `airmonitor`;
-- the target contains unexpected tables, application data, or an incompatible
-  Alembic state;
-- required credentials or database privileges are unavailable.
-
-Forbidden operations:
-
-- connecting to a remote or production PostgreSQL server;
-- printing or persisting passwords or complete credential-bearing database
-  URLs;
-- reading or modifying `backend/.env`;
-- inventing credentials;
-- creating, altering, or dropping PostgreSQL roles;
-- changing PostgreSQL server configuration;
-- running downgrade against the `airmonitor` database;
-- dropping, truncating, deleting from, recreating, or resetting the
-  `airmonitor` database or its schema;
-- migrating legacy SQLite data;
-- modifying source code, tests, migrations, legacy files, or Git state during
-  Gate B and Gate C.
+The local `airmonitor` database must not be modified during Sprint 6.
   
 ## Protected legacy files
 
@@ -221,51 +189,36 @@ py -3.13 -m venv backend/.venv
 
 ## Definition of done
 
-Sprint 5 is complete when:
+Sprint 6 is complete when:
 
-1. Exactly one Alembic revision exists.
-2. The revision has `down_revision = None`.
-3. Upgrade creates exactly these four domain tables:
-   `devices`, `measurement_sessions`, `device_runtime_state`, and
-   `raw_measurements`.
-4. Tables are created in dependency-safe order.
-5. The migration matches the approved ORM metadata.
-6. Primary keys, foreign keys, ON DELETE behavior, unique constraints, check
-   constraints, server defaults, and indexes are explicitly represented.
-7. Composite same-device foreign keys are preserved.
-8. The session lifecycle constraint is preserved.
-9. Downgrade removes all indexes and tables in dependency-safe reverse order.
-10. Upgrade and downgrade SQL can be generated in PostgreSQL offline mode.
-11. No live PostgreSQL connection is attempted during Codex implementation or
-    verification.
-12. No table, schema, user, role, extension, or database is created during the
-    Codex task.
-13. Migration tests require no PostgreSQL service or network access.
-14. All existing backend tests remain passing.
-15. Alembic reports exactly one head.
-16. `pip check`, `compileall`, `git diff --check`, scope checks, generated-file
-    checks, and secret checks pass.
-17. No AirMonitor v1 file is modified.
-18. No real `.env`, database, dump, certificate, key, credential, or secret is
-    created or committed.
-19. Codex does not stage, commit, push, switch branches, reset, restore, clean,
-    stamp, upgrade, or downgrade a live database.
-20. The initial migration tests were run before the revision existed and
-    failed for the expected missing-revision reason.
-21. All offline tests and SQL-generation checks passed before any live
-    PostgreSQL operation.
-22. A disposable local PostgreSQL database was used for an
-    upgrade-downgrade-upgrade integration cycle.
-23. The disposable database schema was inspected and matched the approved ORM
-    metadata.
-24. Only the disposable test database was dropped.
-25. The local target was verified as localhost/127.0.0.1 and database
-    `airmonitor`.
-26. The target database was confirmed safe and empty before migration.
-27. `alembic upgrade head` was successfully applied to the local development
-    database.
-28. `alembic current` reports the initial revision.
-29. The local development database contains the four approved domain tables
-    and `alembic_version`.
-30. No live downgrade or destructive operation was performed against the
-    local `airmonitor` database.
+1. Repository classes exist for devices, runtime state, sessions, and raw
+   measurements.
+2. Repository methods use AsyncSession and SQLAlchemy 2.x statements.
+3. Repositories never commit, rollback, or open transactions.
+4. Service methods own transaction boundaries.
+5. Creating a device also creates its runtime state atomically.
+6. Starting a session updates runtime state atomically.
+7. Starting a second active session for the same device is rejected.
+8. Completing a session sets status, ended_at, disables measurement, and clears
+   active_session_id atomically.
+9. Cancelling a session performs the equivalent consistent state transition.
+10. Raw measurements require an active session for the same device.
+11. Duplicate non-null source_message_id values are handled idempotently or
+    rejected with an explicit domain exception.
+12. Recording a measurement increments sample_count and updates last_seen_at in
+    the same transaction.
+13. Inactive devices cannot start sessions or record measurements.
+14. Missing devices and sessions produce explicit domain exceptions.
+15. Concurrent session operations use appropriate row-level locking.
+16. Unit tests cover repository statements and service behavior.
+17. PostgreSQL integration tests pass against a disposable local database.
+18. Integration tests cover successful and rejected state transitions.
+19. The disposable database is removed after verification.
+20. The local `airmonitor` database is not modified.
+21. No new Alembic revision is created.
+22. All existing backend tests remain passing.
+23. `pip check`, `compileall`, and `git diff --check` pass.
+24. No legacy, secret, `.env`, certificate, key, database, or dump file is
+    modified or committed.
+25. Codex performs no Git staging, commit, push, reset, restore, clean, or branch
+    operation.
