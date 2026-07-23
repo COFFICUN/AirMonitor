@@ -794,11 +794,14 @@ def test_mapper_configuration_emits_no_sqlalchemy_warnings() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_no_alembic_revision_exists() -> None:
+def test_exactly_one_initial_alembic_revision_exists() -> None:
     revision_files = sorted(
         path.name
         for path in (BACKEND_DIRECTORY / "alembic" / "versions").glob("*.py")
         if path.name != "__init__.py"
     )
 
-    assert revision_files == []
+    assert len(revision_files) == 1
+    assert revision_files[0].endswith(
+        "_create_initial_airmonitor_schema.py"
+    )
