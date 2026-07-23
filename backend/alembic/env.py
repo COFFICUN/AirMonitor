@@ -18,12 +18,6 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-settings = get_settings()
-config.set_main_option(
-    "sqlalchemy.url",
-    settings.database_url.replace("%", "%%"),
-)
-
 target_metadata = Base.metadata
 
 
@@ -64,6 +58,11 @@ async def run_async_migrations() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in online mode."""
+    settings = get_settings()
+    config.set_main_option(
+        "sqlalchemy.url",
+        settings.database_url.replace("%", "%%"),
+    )
     asyncio.run(run_async_migrations())
 
 
