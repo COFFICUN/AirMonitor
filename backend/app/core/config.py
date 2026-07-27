@@ -2,9 +2,9 @@
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,11 +36,30 @@ class Settings(BaseSettings):
             )
         return value
 
+    @model_validator(mode="after")
+    def validate_production_settings(self) -> Self:
+        """Reject diagnostic and development defaults in production."""
+        if self.environment != "production":
+            return self
+        if self.debug:
+            raise ValueError("debug must be disabled in production")
+        if self.database_echo:
+            raise ValueError("database_echo must be disabled in production")
+        default_database_url = type(self).model_fields[
+            "database_url"
+        ].default
+        if self.database_url == default_database_url:
+            raise ValueError(
+                "database_url must be explicitly configured in production"
+            )
+        return self
+
     model_config = SettingsConfigDict(
         env_prefix="AIRMONITOR_",
         env_file=BACKEND_DIRECTORY / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
 

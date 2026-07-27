@@ -28,6 +28,25 @@ def clear_settings_environment(monkeypatch: MonkeyPatch) -> None:
         monkeypatch.delenv(variable_name, raising=False)
 
 
+def default_database_url() -> str:
+    value = Settings.model_fields["database_url"].default
+    assert isinstance(value, str)
+    return value
+
+
+def non_default_database_url() -> str:
+    return f"{default_database_url()}_production"
+
+
+def sensitive_database_url(
+    username: str,
+    password: str,
+    sentinel: str,
+) -> str:
+    driver = default_database_url().split("://", maxsplit=1)[0]
+    return f"{driver}://{username}:{password}@invalid/{sentinel}"
+
+
 def test_settings_defaults(monkeypatch: MonkeyPatch) -> None:
     clear_settings_environment(monkeypatch)
 
@@ -85,6 +104,91 @@ def test_settings_rejects_invalid_environment(monkeypatch: MonkeyPatch) -> None:
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_production_rejects_debug() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            environment="production",
+            debug=True,
+            database_url=non_default_database_url(),
+            _env_file=None,
+        )
+
+
+def test_production_rejects_database_echo() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            environment="production",
+            database_echo=True,
+            database_url=non_default_database_url(),
+            _env_file=None,
+        )
+
+
+def test_production_rejects_unchanged_default_database_url() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            environment="production",
+            database_url=default_database_url(),
+            _env_file=None,
+        )
+
+
+def test_safe_explicit_production_configuration_is_accepted() -> None:
+    settings = Settings(
+        environment="production",
+        debug=False,
+        database_echo=False,
+        database_url=non_default_database_url(),
+        _env_file=None,
+    )
+
+    assert settings.environment == "production"
+    assert settings.debug is False
+    assert settings.database_echo is False
+    assert settings.database_url != default_database_url()
+
+
+@pytest.mark.parametrize("environment", ["development", "test"])
+def test_non_production_settings_retain_diagnostic_defaults(
+    environment: str,
+) -> None:
+    settings = Settings(
+        environment=environment,
+        debug=True,
+        database_echo=True,
+        database_url=default_database_url(),
+        _env_file=None,
+    )
+
+    assert settings.environment == environment
+    assert settings.debug is True
+    assert settings.database_echo is True
+    assert settings.database_url == default_database_url()
+
+
+def test_production_validation_hides_sensitive_inputs_and_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    username = "PHASE_C2B_USERNAME_SENTINEL"
+    password = "PHASE_C2B_PASSWORD_SENTINEL"
+    sentinel = "PHASE_C2B_DATABASE_SENTINEL"
+    database_url = sensitive_database_url(username, password, sentinel)
+
+    with pytest.raises(ValidationError) as error_info:
+        Settings(
+            environment="production",
+            debug=True,
+            database_url=database_url,
+            _env_file=None,
+        )
+
+    error_text = str(error_info.value).casefold()
+    captured_logs = caplog.text.casefold()
+    for marker in (username, password, sentinel):
+        assert marker.casefold() not in error_text
+        assert marker.casefold() not in captured_logs
 
 
 def test_application_metadata_uses_supplied_settings() -> None:

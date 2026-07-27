@@ -116,6 +116,25 @@ async def test_database_engine_uses_asyncpg_without_connecting() -> None:
         await engine.dispose()
 
 
+def test_engine_creator_hides_parameters_without_connecting() -> None:
+    settings = Settings(_env_file=None)
+    engine = object()
+
+    with (
+        patch(
+            "app.db.session.create_async_engine",
+            return_value=engine,
+        ) as engine_creator,
+        patch("asyncpg.connect") as connect,
+    ):
+        created_engine = create_database_engine(settings)
+
+    assert created_engine is engine
+    assert engine_creator.call_count == 1
+    assert engine_creator.call_args.kwargs["hide_parameters"] is True
+    connect.assert_not_called()
+
+
 @pytest.mark.anyio
 async def test_session_factory_configuration() -> None:
     engine = create_database_engine(Settings(_env_file=None))

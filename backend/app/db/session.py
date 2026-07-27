@@ -16,6 +16,7 @@ def create_database_engine(settings: Settings) -> AsyncEngine:
         settings.database_url,
         echo=settings.database_echo,
         pool_pre_ping=settings.database_pool_pre_ping,
+        hide_parameters=True,
     )
 
 
