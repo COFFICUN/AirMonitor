@@ -20,182 +20,213 @@ PostgreSQL, Pydantic, and pytest.
 
 ## Current active task
 
-Sprint 8 Phase C2B — API Error Contract and Production Hardening.
+Sprint 8 Phase C3 — Test Infrastructure Hardening.
 
 Implement only:
 
-- AUDIT-005: complete the public error envelope for framework HTTP errors and
-  unexpected server errors, and align OpenAPI documentation;
-- AUDIT-006: reject unsafe production settings and hide SQL parameters.
+- AUDIT-008: the persistence integration suite must use the dedicated
+  AIRMONITOR_TEST_DATABASE_URL variable and ignore the application database
+  variable;
+- AUDIT-009: persistence preflight connection failures must be sanitized and
+  must not retain credential-bearing exception cause or context;
+- AUDIT-012: replace the false-positive dependency-override cleanup test with
+  a test of the real cleanup mechanism;
+- AUDIT-013: isolate the health contract test from ambient settings.
 
-Read completely before changing code:
+Read completely before changing files:
 
 docs/reviews/sprint-8-full-codebase-audit.md
 
-Preserve all completed Phase C1 and C2A behavior.
+Preserve all completed Phase C1, C2A, and C2B behavior.
 
-## Approved HTTP error policy
+## Approved database-test variable policy
 
-Framework-level errors must use the existing ErrorResponse envelope.
+Persistence integration tests must use only:
 
-Required mappings:
+AIRMONITOR_TEST_DATABASE_URL
 
-- unknown route:
-  - status 404;
-  - code `not_found`;
-  - safe fixed message;
-- method not allowed:
-  - status 405;
-  - code `method_not_allowed`;
-  - safe fixed message;
-  - preserve the `Allow` header;
-- unexpected application/server failure:
-  - status 500;
-  - code `internal_server_error`;
-  - safe fixed message.
+They must not consume:
 
-Never expose:
+AIRMONITOR_DATABASE_URL
 
-- exception text;
-- traceback content;
-- SQL statements or parameters;
-- database URLs;
-- usernames or passwords;
-- constraint names;
-- internal filesystem paths;
-- sentinel values included in thrown exceptions.
+The application database variable may be present in the process, but the
+persistence integration suite must ignore it.
 
-Existing domain-error, validation-error, and IntegrityError behavior must remain
-unchanged.
+Do not read, print, log, or include the value of any real database environment
+variable in reports or error messages.
 
-All eight /api/v1 operations must document a generic safe 500 response using
-the existing ErrorResponse schema. Do not change operation IDs, routes, request
-models, success responses, or successful status codes.
+Tests may use synthetic sentinel URLs created entirely inside the test process.
 
-## Approved production configuration policy
+Preserve all existing persistence target protections:
 
-When environment is production, settings validation must reject:
+- postgresql+asyncpg driver requirement;
+- local-host restriction;
+- protected database rejection;
+- disposable database naming requirement;
+- rejection of target-changing URL query parameters;
+- explicit live-test opt-in.
 
-- debug=true;
-- database_echo=true;
-- the unchanged built-in development database URL.
+## Approved preflight failure policy
 
-The async SQLAlchemy engine must be constructed with parameter hiding enabled:
+A connection/preflight failure must produce a short fixed message that does
+not include:
 
-hide_parameters=True
+- database URL;
+- username;
+- password;
+- database name;
+- host or port;
+- query parameters;
+- driver exception representation;
+- SQL text;
+- filesystem paths;
+- arbitrary sentinel text.
 
-This applies independently of environment.
+The raised exception must not retain the original exception through
+`__cause__` or `__context__`.
 
-Development and test behavior must remain compatible.
+Use `raise ... from None` or an equivalent mechanism that is proven by tests.
 
-Do not print, log, inspect, or expose database URL values.
+Do not connect to PostgreSQL during this phase.
+
+## Approved dependency-override cleanup policy
+
+Replace the existing false-positive cleanup test.
+
+The new test must exercise the same fixture/helper used by the test
+application and verify that dependency overrides are restored after an
+exception.
+
+The test must fail if the actual cleanup logic is removed.
+
+Do not write a test that manually performs the restoration it claims to test.
+
+A small test-only context manager or helper is allowed when:
+
+- the real fixture uses it;
+- its cleanup is implemented with `try/finally`;
+- the regression test exercises that same helper;
+- no production module depends on it.
+
+## Approved health-test isolation policy
+
+Health tests must construct explicit settings with `_env_file=None`.
+
+Conflicting ambient values for service name, version, environment, debug, or
+other supported settings must not affect the expected health response.
+
+Do not change the production health endpoint contract.
 
 ## Required workflow
 
 Start with `using-agent-skills` and select the minimum sufficient installed
 skills.
 
-Use strict test-driven development:
+Use test-driven development:
 
-1. inspect current handlers, settings, engine creation, and OpenAPI responses;
-2. add focused failing regression tests;
-3. prove failures correspond to AUDIT-005 and AUDIT-006;
-4. implement the smallest coherent fix;
+1. inspect the current test guards and fixtures;
+2. add focused tests that expose each accepted defect;
+3. run them and confirm the intended failures;
+4. make the smallest test-infrastructure changes;
 5. rerun focused tests;
-6. run the complete offline backend suite;
+6. run the complete offline suite;
 7. perform a bounded adversarial review;
 8. stop for manual external review.
 
-Do not implement before RED tests are demonstrated.
+Do not implement before RED failures are demonstrated.
 
 ## Allowed production scope
 
-Modify only files directly required, primarily:
+No production application change is expected.
 
-- backend/app/api/errors.py
-- backend/app/api/responses.py
-- backend/app/api/router.py
-- backend/app/api/v1/router.py
-- backend/app/api/v1/endpoints/devices.py
-- backend/app/api/v1/endpoints/measurements.py
-- backend/app/api/v1/endpoints/sessions.py
-- backend/app/schemas/errors.py
-- backend/app/core/config.py
-- backend/app/db/session.py
-- backend/app/main.py
-
-Use only the minimum necessary subset.
+Production files under backend/app must not be modified unless a test-only
+solution is demonstrably impossible. Stop and report instead of changing
+production code without authorization.
 
 ## Allowed test scope
 
-Tests may be added or modified only where directly required, including:
+Changes are limited to the minimum necessary subset of:
 
-- backend/tests/test_api_errors.py
-- backend/tests/test_api_openapi.py
+- backend/tests/persistence_guard.py
+- backend/tests/test_persistence_guard.py
+- backend/tests/test_persistence_integration.py
+- backend/tests/api_integration_guard.py only if a shared safe helper is
+  clearly preferable and existing API guard behavior remains unchanged
+- backend/tests/test_api_integration_guard.py only for compatible regression
+  coverage
 - backend/tests/test_api_routes.py
-- backend/tests/test_config.py
-- backend/tests/test_database.py
-- backend/tests/test_application_composition.py
-- one focused new test module if it materially improves clarity
+- backend/tests/test_health.py
+- backend/tests/conftest.py if it exists or is justified as a small shared
+  test-only fixture module
+- one small focused test-only helper module under backend/tests if required
 
-Do not modify integration guards or database cleanup behavior.
+Do not modify live database cleanup/provisioning behavior. AUDIT-010 remains
+deferred.
 
-## AUDIT-005 acceptance criteria
-
-Prove all of the following:
-
-1. Unknown routes return the ErrorResponse envelope with status 404.
-2. Wrong methods return the ErrorResponse envelope with status 405.
-3. The 405 response preserves the correct Allow header.
-4. A synthetic RuntimeError returns a sanitized 500 ErrorResponse.
-5. A synthetic SQLAlchemy non-IntegrityError returns the same sanitized 500.
-6. Exception messages, SQL, URLs, credentials, constraint names, paths, and
-   sentinel values do not appear in response bodies.
-7. Existing domain-error responses remain unchanged.
-8. Existing request-validation responses remain unchanged.
-9. Existing IntegrityError responses remain unchanged.
-10. All eight /api/v1 operations document the generic ErrorResponse 500.
-11. OpenAPI operation count, paths, operation IDs, request models, successful
-    status codes, and successful response schemas remain unchanged.
-12. Debug-mode behavior is not relied on for production safety.
-
-## AUDIT-006 acceptance criteria
+## AUDIT-008 acceptance criteria
 
 Prove all of the following:
 
-1. Production plus debug=true is rejected during Settings validation.
-2. Production plus database_echo=true is rejected.
-3. Production plus the unchanged built-in database URL is rejected.
-4. A production configuration with debug=false, echo=false, and an explicit
-   non-default PostgreSQL+asyncpg URL is accepted.
-5. Development/test configurations retain current behavior.
-6. Engine construction always passes hide_parameters=True.
-7. Engine construction remains lazy and does not connect.
-8. No database URL or credential is printed into failures or captured logs.
-9. Application-owned engine/session behavior from Phase C1 remains intact.
-10. No database, migration, or API success contract changes.
+1. Persistence integration tests read AIRMONITOR_TEST_DATABASE_URL.
+2. AIRMONITOR_DATABASE_URL is ignored by the persistence suite.
+3. Setting only AIRMONITOR_DATABASE_URL cannot activate or target persistence
+   integration tests.
+4. Setting the dedicated variable with the required opt-in follows the existing
+   target validation path.
+5. Missing dedicated configuration produces only a fixed safe message or skip.
+6. No database URL value appears in test output or exception text.
+7. Existing driver, host, query-parameter, protected-name, and prefix guards
+   remain intact.
+8. No PostgreSQL connection occurs in offline tests.
+
+## AUDIT-009 acceptance criteria
+
+Prove all of the following:
+
+1. A synthetic connection/preflight exception containing a sentinel URL,
+   username, password, database name, and driver text is sanitized.
+2. The public failure message contains none of those values.
+3. The resulting exception has no retained `__cause__`.
+4. The resulting exception has no retained `__context__`.
+5. The safe API integration preflight behavior remains unchanged.
+6. No live connection is attempted.
+
+## AUDIT-012 acceptance criteria
+
+Prove all of the following:
+
+1. The actual application fixture/helper restores its previous dependency
+   overrides after normal use.
+2. It restores the overrides after an exception inside the fixture context.
+3. Pre-existing overrides are restored exactly, not merely cleared.
+4. Overrides added during the context do not leak.
+5. The regression fails if the real `finally` restoration is removed.
+6. Existing route tests retain their current behavior.
+
+## AUDIT-013 acceptance criteria
+
+Prove all of the following:
+
+1. The health test creates explicit isolated Settings.
+2. `_env_file=None` is used.
+3. Conflicting environment variables do not change the expected response.
+4. Existing module-level application behavior is not modified.
+5. The health endpoint response contract remains unchanged.
 
 ## Explicitly forbidden
 
 Do not:
 
-- implement telemetry read endpoints;
-- implement AUDIT-008 or later findings;
-- implement authentication or authorization;
-- add CORS;
-- add rate limiting;
-- add Docker or CI;
-- introduce structured logging or observability architecture;
-- redesign the error schema;
-- change existing domain error codes;
-- change chronology or integer-boundary behavior;
-- change routes or operation IDs;
-- create or modify Alembic revisions;
-- modify ORM models, constraints, indexes, relationships, or database types;
+- implement AUDIT-010 automated database creation or cleanup;
 - connect to PostgreSQL;
-- create, inspect, migrate, clean, or drop a database;
-- install or update dependencies;
-- modify requirements;
+- create, inspect, migrate, truncate, clean, or drop a database;
+- set a real database URL;
+- print or read existing database URL values;
+- implement telemetry read endpoints;
+- change production error handlers or production settings;
+- modify routes, schemas, services, repositories, ORM models, or migrations;
+- change authentication, CORS, Docker, CI, logging, or observability;
+- modify requirements or install dependencies;
 - modify the audit report or README;
 - modify Agent Skills;
 - modify legacy files, firmware, secrets, certificates, keys, or .env files;
@@ -209,56 +240,54 @@ Use only:
 
 C:\Users\nazar\Desktop\AirMonitor\backend\.venv\Scripts\python.exe
 
-Do not change this environment.
+Do not modify the environment.
 
-Run tests with:
+Use:
 
-- -B;
-- -p no:cacheprovider;
-- no live PostgreSQL opt-ins;
-- no dependency installation.
-
-Do not read or print database URL values.
+- `-B`;
+- `-p no:cacheprovider`;
+- no live-test activation;
+- no PostgreSQL connection;
+- synthetic environment values only inside focused tests.
 
 ## Required verification
 
 At minimum run:
 
-1. focused framework/generic error tests;
-2. focused production-settings tests;
-3. focused engine-construction tests;
-4. affected error, route, config, database, OpenAPI, and composition tests;
-5. the complete offline backend suite;
-6. pip check;
-7. guarded offline OpenAPI generation;
-8. import/factory/lifespan/OpenAPI no-connection guards;
-9. in-memory/source compilation without repository bytecode;
+1. focused persistence-variable tests;
+2. focused preflight-sanitization tests;
+3. focused override-cleanup tests;
+4. isolated health tests;
+5. affected guard, route, health, and offline integration tests;
+6. the complete offline backend suite;
+7. pip check;
+8. guarded import/OpenAPI no-connection tests;
+9. in-memory/source compilation without generated bytecode;
 10. git diff --check;
 11. sensitive/generated-path checks;
 12. final read-only diff and status inspection.
 
-Expected OpenAPI inventory remains:
+The expected public API inventory remains:
 
 - nine total operations;
-- eight operations under /api/v1;
-- one /health operation;
+- eight under /api/v1;
+- one /health;
 - unique operation IDs.
 
 ## Definition of done
 
-Phase C2B is complete only when:
+Phase C3 is complete only when:
 
-- RED tests reproduce AUDIT-005 and AUDIT-006;
-- both findings are fixed;
-- framework and generic failures use the approved safe envelope;
-- unsafe production settings fail closed;
-- SQL parameters are hidden;
-- existing domain/validation/integrity behavior remains compatible;
-- the complete offline suite passes;
-- OpenAPI inventory remains unchanged;
+- RED tests reproduce AUDIT-008, AUDIT-009, AUDIT-012, and AUDIT-013;
+- the dedicated persistence variable is enforced;
+- persistence preflight failures are safely sanitized;
+- real dependency-override cleanup is tested;
+- health tests are environment-independent;
+- the full offline suite passes;
 - no PostgreSQL connection occurs;
-- no migration, ORM, dependency, legacy, or unrelated file changes;
+- no production application file changes;
+- no migration, dependency, documentation, legacy, or sensitive changes;
 - Codex performs no Git write operation;
-- the final response lists RED failures, changed files, exact commands and
-  results, compatibility impact, remaining limitations, and final Git status.
+- the final response lists RED failures, changed files, exact commands/results,
+  compatibility impact, remaining limitations, and exact Git status.
 '@ | Set-Content -Path ".\AGENTS.md" -Encoding UTF8
