@@ -1,5 +1,6 @@
 """Offline HTTP contract tests using dependency-overridden services."""
 
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -929,12 +930,32 @@ async def test_health_endpoint_is_preserved(application: FastAPI) -> None:
     assert response.json()["status"] == "ok"
 
 
-def test_application_fixture_restores_dependency_overrides_after_failure() -> None:
-    application = create_application(Settings(_env_file=None))
-    original = dict(application.dependency_overrides)
-    application.dependency_overrides[get_device_service] = lambda: object()
+def _application_fixture_context() -> object:
+    return contextmanager(application.__wrapped__)()
 
-    application.dependency_overrides.clear()
-    application.dependency_overrides.update(original)
 
-    assert application.dependency_overrides == original
+def test_application_fixture_restores_exact_overrides_after_normal_use() -> None:
+    with _application_fixture_context() as test_application:
+        original = dict(test_application.dependency_overrides)
+        assert original
+        test_application.dependency_overrides[get_device_service] = (
+            lambda: object()
+        )
+
+    assert test_application.dependency_overrides == original
+
+
+def test_application_fixture_restores_exact_overrides_after_exception() -> None:
+    class IntentionalFixtureFailure(RuntimeError):
+        pass
+
+    with pytest.raises(IntentionalFixtureFailure):
+        with _application_fixture_context() as test_application:
+            original = dict(test_application.dependency_overrides)
+            assert original
+            test_application.dependency_overrides[get_device_service] = (
+                lambda: object()
+            )
+            raise IntentionalFixtureFailure
+
+    assert test_application.dependency_overrides == original
