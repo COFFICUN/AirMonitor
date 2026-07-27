@@ -20,210 +20,226 @@ PostgreSQL, Pydantic, and pytest.
 
 ## Current active task
 
-Sprint 8 Phase C1 — Application Composition and Finite Telemetry.
+Sprint 8 Phase C2A — Domain Boundaries.
 
 Implement only:
 
-- AUDIT-001: factory-provided settings must control the actual database engine
-  and session factory used by requests;
-- AUDIT-007 as part of AUDIT-001: the application-owned async engine must be
-  disposed through FastAPI lifespan;
-- AUDIT-002: non-finite telemetry must be rejected before any persistence
-  operation.
+- AUDIT-003: measurement timestamps and session terminal timestamps must form
+  one consistent interval;
+- AUDIT-004: public API integer inputs mapped to PostgreSQL INTEGER must respect
+  the signed int32 range.
 
-Read the following report completely before changing code:
+Read this report completely before changing code:
 
 docs/reviews/sprint-8-full-codebase-audit.md
 
-## Required skills and workflow
+Phase C1 is already complete. Preserve its application-owned database state,
+lifespan disposal, and non-finite telemetry validation.
 
-Start with `using-agent-skills` and choose the minimum sufficient installed
+## Approved domain decisions
+
+### Session chronology
+
+Use a strict timestamp policy with no implicit clock-skew allowance:
+
+- measurement.measured_at must be greater than or equal to
+  session.started_at;
+- complete/cancel ended_at must be greater than or equal to the latest
+  persisted measurement.measured_at;
+- equality is valid;
+- the rule applies to both completed and cancelled sessions;
+- contradictory timestamps use the existing conflict/domain-error mechanism
+  and the existing safe 409 envelope.
+
+Do not add a configurable tolerance or silently adjust timestamps.
+
+### PostgreSQL INTEGER range
+
+Public integer inputs backed by PostgreSQL INTEGER must not exceed:
+
+2_147_483_647
+
+Keep the current lower bounds:
+
+- identifiers remain greater than zero;
+- particle counters remain greater than or equal to zero.
+
+Do not migrate any column to BIGINT in this phase.
+
+## Required workflow
+
+Start with `using-agent-skills` and select the minimum sufficient installed
 skills.
 
-The preferred workflow is:
+Use strict test-driven development:
 
 1. inspect the current implementation;
-2. reproduce each accepted defect with focused failing tests;
-3. confirm that each test fails for the intended reason;
-4. make the smallest implementation change;
+2. add focused failing regression tests;
+3. prove each test fails for the intended defect;
+4. make the smallest coherent implementation change;
 5. rerun focused tests;
 6. run the complete offline backend suite;
-7. perform an independent review/challenge pass;
-8. report the final diff and verification results.
+7. perform a bounded adversarial review;
+8. stop for manual external review.
 
-Use test-driven development. Do not implement a fix before proving the defect
-with a failing regression test.
+Do not implement before the RED tests are demonstrated.
 
 ## Allowed production scope
 
-Production changes are limited to files directly required for AUDIT-001,
-AUDIT-002, and AUDIT-007, primarily:
+Changes are limited to files directly required for AUDIT-003 and AUDIT-004,
+primarily:
 
-- backend/app/main.py
-- backend/app/db/__init__.py
-- backend/app/db/session.py
-- backend/app/db/dependencies.py
-- backend/app/api/dependencies.py
+- backend/app/services/measurement.py
+- backend/app/repositories/measurement.py
+- backend/app/repositories/measurement_session.py
 - backend/app/schemas/_base.py
 - backend/app/schemas/measurements.py
-- backend/app/services/measurement.py
-- backend/app/core/exceptions.py only if an existing domain-error mechanism
-  cannot express the service-level finite-value rejection cleanly
+- backend/app/schemas/sessions.py
+- backend/app/api/v1/endpoints/devices.py
+- backend/app/api/v1/endpoints/measurements.py
+- backend/app/api/v1/endpoints/sessions.py
+- backend/app/core/exceptions.py only if the existing domain-error mechanism
+  cannot represent chronology conflicts cleanly
 
-Do not change unrelated production files.
+Modify only the minimum necessary subset.
 
 ## Allowed test scope
 
-Tests may be added or modified only where directly required for the accepted
-findings, including:
+Tests may be added or modified only where directly required, including:
 
-- backend/tests/test_config.py
-- backend/tests/test_database.py
-- backend/tests/test_api_dependencies.py
-- backend/tests/test_api_architecture.py
 - backend/tests/test_api_schemas.py
 - backend/tests/test_api_routes.py
-- backend/tests/test_api_openapi.py
 - backend/tests/test_services.py
-- backend/tests/test_health.py
-- backend/tests/test_api_integration.py only for compatibility with the new
-  application composition; do not change its database guard or cleanup policy
-- one or two focused new test modules under backend/tests if that produces
-  clearer regression coverage
+- backend/tests/test_repositories.py
+- backend/tests/test_api_openapi.py
+- backend/tests/test_api_errors.py
+- backend/tests/test_api_integration.py only if existing guarded integration
+  behavior requires compatibility changes
+- one focused new test module if it materially improves clarity
 
-Do not modify persistence guards, test-database policies, or unrelated tests.
+Do not modify integration guards or database cleanup policy.
 
-## AUDIT-001 and AUDIT-007 acceptance criteria
+## AUDIT-003 acceptance criteria
 
-The implementation must prove all of the following:
+Prove all of the following:
 
-1. `create_application(application_settings)` constructs the database engine
-   from that exact settings object.
-2. The request session factory belongs to that exact application instance.
-3. Two applications created with different sentinel database URLs do not share
-   settings, engines, or session factories.
-4. The request path does not call a process-global cached settings object to
-   select the database target.
-5. Creating/importing an application does not connect to PostgreSQL.
-6. Generating OpenAPI does not connect to PostgreSQL.
-7. One request still receives one request-scoped AsyncSession.
-8. The application engine is disposed exactly once through lifespan.
-9. Separate application lifecycles do not share an engine or connection pool.
-10. The module-level `app` entrypoint remains usable by Uvicorn.
-11. Existing dependency overrides used by tests remain supported.
-12. No API path, request model, response model, status code, or operation ID
-    changes.
+1. A measurement before the active session start is rejected.
+2. A measurement exactly at session start is accepted.
+3. Completing a session before its latest measurement is rejected.
+4. Cancelling a session before its latest measurement is rejected.
+5. Ending exactly at the latest measurement timestamp is accepted.
+6. A failed chronology check leaves session state, runtime state, sample count,
+   and raw measurements unchanged.
+7. The latest-measurement check occurs inside the service-owned transaction
+   while the established device → runtime → session lock order is preserved.
+8. Record versus complete/cancel cannot create a measurement outside the
+   terminal interval under the existing lock order.
+9. Existing valid ingestion and session-transition behavior remains unchanged.
+10. Contradictory timestamp requests use the existing safe 409 envelope.
 
-Prefer application-owned state and dependency resolution over process-global
-database caches.
+Use the smallest query needed to retrieve the latest measurement timestamp.
+Do not introduce unbounded result loading.
 
-## AUDIT-002 acceptance criteria
+## AUDIT-004 acceptance criteria
 
-The implementation must prove all of the following:
+Prove all of the following:
 
-1. JSON values that become positive or negative infinity are rejected with the
-   existing safe 422 validation envelope.
-2. Parser-supported NaN and Infinity forms are rejected.
-3. Request validation rejects non-finite telemetry before the endpoint service
-   is invoked.
-4. Direct non-HTTP service calls also reject non-finite PM values.
-5. Service-level rejection occurs before transaction entry and before any
-   repository insert, session counter update, or runtime-state update.
-6. Valid finite values retain existing behavior.
-7. No post-commit response-serialization failure is possible from accepted PM
-   values.
-8. No PostgreSQL migration or database constraint is added in this phase.
+1. Path identifiers accept 2_147_483_647.
+2. Path identifiers reject 2_147_483_648 with the existing safe 422 envelope.
+3. All six particle-counter fields accept 2_147_483_647.
+4. All six particle-counter fields reject 2_147_483_648.
+5. Rejected values never invoke the endpoint service or repository.
+6. Existing lower-bound behavior remains unchanged.
+7. OpenAPI exposes the integer maximum.
+8. No API route, operation ID, successful response, or valid request behavior
+   changes.
+9. No database migration is added.
 
-Use a shared Pydantic request policy such as `allow_inf_nan=False` when it is
-compatible with the current request models. Preserve all existing valid ranges.
+Prefer shared constrained aliases or schema definitions over repeated magic
+numbers when that can be done without unrelated refactoring.
 
-## Explicitly forbidden in Phase C1
+## Explicitly forbidden
 
 Do not:
 
 - implement telemetry read endpoints;
-- add or change routes;
-- implement AUDIT-003 through AUDIT-014;
-- change public error-envelope policy;
-- change production hardening settings;
-- change API integer limits;
-- change session chronology rules;
+- implement AUDIT-005 or later findings;
+- change the generic error envelope;
+- change production debug/echo settings;
+- change authentication, authorization, CORS, Docker, CI, logging, or
+  observability;
+- add clock-skew tolerance;
+- change session status semantics;
+- migrate INTEGER columns to BIGINT;
 - create or modify Alembic revisions;
-- modify ORM tables, columns, constraints, indexes, or relationships;
+- modify ORM columns, constraints, indexes, foreign keys, or relationships;
 - connect to PostgreSQL;
-- create, drop, migrate, clean, or inspect a database;
-- set test-database environment variables;
+- create, inspect, migrate, clean, or drop a database;
+- set or read database URL values;
 - install or update dependencies;
-- modify requirements files;
+- modify requirements;
 - modify the audit report;
-- modify README or other documentation;
-- modify global or project Agent Skills;
-- open or print secrets, credentials, certificates, keys, .env files, or
-  database URLs;
-- edit legacy files;
+- modify README or unrelated documentation;
+- modify Agent Skills;
+- modify legacy files, firmware, secrets, certificates, keys, or .env files;
 - perform Git write operations.
-
-Git write operations include add, commit, push, pull, checkout, switch, merge,
-rebase, reset, clean, stash, branch creation/deletion, tag operations, and
-changes to Git configuration.
 
 Read-only Git commands are allowed.
 
 ## Test environment
 
-Use the existing Python environment only for command execution:
+Use only:
 
 C:\Users\nazar\Desktop\AirMonitor\backend\.venv\Scripts\python.exe
 
-Do not modify that environment and do not run pip install.
+Do not change this environment.
 
-Run tests from the Codex worktree backend directory. Use:
+Run tests with:
 
-- `-B` or `PYTHONDONTWRITEBYTECODE=1`;
+- `-B`;
 - `-p no:cacheprovider`;
-- no live integration opt-in;
-- no database URL environment variables.
+- live database opt-ins absent;
+- all PostgreSQL integration suites skipped.
 
-The complete offline suite must pass. Live PostgreSQL suites must remain
-skipped when their explicit opt-ins are absent.
-
-## Required final verification
+## Required verification
 
 At minimum run:
 
-1. focused regression tests for application composition and lifespan;
-2. focused schema/API/service tests for non-finite telemetry;
-3. the complete offline backend test suite;
-4. `pip check`;
-5. offline OpenAPI generation and operation-ID verification;
-6. connection guards proving import, factory construction, lifespan setup, and
-   OpenAPI generation do not connect;
-7. source compilation without generated files in the repository;
-8. `git diff --check`;
-9. final tracked/untracked sensitive-path check;
-10. read-only final diff and status inspection.
+1. focused service chronology tests;
+2. focused API/schema int32 tests;
+3. affected existing service, repository, route, schema, and OpenAPI tests;
+4. the complete offline backend test suite;
+5. pip check;
+6. guarded offline OpenAPI generation;
+7. import/OpenAPI no-connection guards;
+8. source compilation without repository bytecode;
+9. git diff --check;
+10. sensitive/generated-path checks;
+11. final read-only diff and status inspection.
 
 Expected API inventory remains:
 
-- nine total OpenAPI operations;
-- eight operations under `/api/v1`;
-- one `/health` operation;
+- nine total operations;
+- eight under /api/v1;
+- one /health operation;
 - unique operation IDs.
 
 ## Definition of done
 
-Phase C1 is complete only when:
+Phase C2A is complete only when:
 
-- focused failing tests reproduced AUDIT-001 and AUDIT-002 before implementation;
-- AUDIT-001, AUDIT-002, and AUDIT-007 are fixed;
-- all accepted criteria above are covered by tests;
+- RED tests reproduce AUDIT-003 and AUDIT-004;
+- both findings are fixed;
+- strict chronology policy is enforced;
+- int32 public boundaries are enforced;
+- existing valid behavior remains compatible;
 - the full offline suite passes;
+- OpenAPI inventory remains unchanged;
 - no PostgreSQL connection occurred;
-- no migration exists in the diff;
+- no migration or ORM change exists;
 - no unrelated finding or feature was implemented;
-- no legacy or sensitive file was touched;
-- no dependency was changed;
-- no Git write operation was performed by Codex;
-- the final response lists every changed file, every test command and result,
-  compatibility impact, remaining limitations, and the exact Git status.
+- no dependency, legacy, sensitive, or documentation file was changed;
+- Codex performed no Git write operation;
+- final response lists failing tests, changed files, commands, results,
+  compatibility impact, limitations, and exact Git status.
 '@ | Set-Content -Path ".\AGENTS.md" -Encoding UTF8
