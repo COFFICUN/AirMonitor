@@ -16,87 +16,277 @@ initial AirMonitor v2 migration.
 
 ## Current task scope
 
-For the `feature/device-measurement-api` branch, implement only the versioned
-REST API layer for the approved AirMonitor v2 device, session, and raw
-measurement workflow.
+For the `feature/full-audit-stabilization` branch, the current task is
+Sprint 8 Phase A: a complete read-only audit of the AirMonitor v2 codebase.
 
-The existing Sprint 6 repositories and transactional services are the approved
-business-logic layer. API routes must use those services and must not duplicate
-their business rules.
+The purpose of this phase is to identify and prove real correctness,
+architecture, security, performance, PostgreSQL, API, configuration, testing,
+and maintainability issues before any bug fix or new endpoint is implemented.
 
-Approved endpoints:
+This phase is review-only.
 
-- `POST /api/v1/devices`;
-- `GET /api/v1/devices/{device_id}`;
-- `PATCH /api/v1/devices/{device_id}/status`;
-- `POST /api/v1/devices/{device_id}/sessions`;
-- `GET /api/v1/devices/{device_id}/sessions/active`;
-- `POST /api/v1/devices/{device_id}/sessions/active/complete`;
-- `POST /api/v1/devices/{device_id}/sessions/active/cancel`;
-- `POST /api/v1/devices/{device_id}/measurements`.
+Codex must not fix, refactor, generate, format, rename, move, delete, or
+otherwise modify production code, tests, migrations, configuration, firmware,
+frontend, or legacy files.
 
-Allowed changes:
+AirMonitor legacy Flask/SQLite files, including `app.py`, `sensor_data.db`,
+certificates, the old HTML/JavaScript frontend, and related code, are read-only
+reference material. They must not be modified or proposed as replacement
+implementations.
+
+The authoritative implementation under review is AirMonitor v2 based on:
+
+- FastAPI;
+- Pydantic;
+- SQLAlchemy async;
+- PostgreSQL;
+- Alembic;
+- pytest;
+- the approved four-table domain model;
+- the existing Sprint 6 repositories and services;
+- the existing Sprint 7 versioned REST API.
+
+Current verified baseline:
+
+- `246 passed, 2 skipped`;
+- sole Alembic head `a4f9c2e7d1b6`;
+- eight approved `/api/v1` operations;
+- protected database `airmonitor` must not be used during the audit.
+
+The audit must cover:
+
+### Architecture
+
+- application composition;
+- package boundaries;
+- router, schema, service, repository, ORM, and migration responsibilities;
+- dependency direction;
+- domain invariants;
+- duplicated logic;
+- hidden coupling;
+- unsafe abstraction leaks;
+- maintainability and readiness for future read APIs, authentication, ESP32,
+  frontend, aggregation, AQI, and observability.
+
+### FastAPI and API contracts
+
+- router registration;
+- path conflicts;
+- status codes;
+- request and response schemas;
+- OpenAPI accuracy;
+- operation ID uniqueness;
+- documented error responses;
+- validation behavior;
+- exception handling;
+- application import behavior;
+- dependency lifecycle;
+- one AsyncSession per request;
+- response serialization after commit;
+- preservation of the existing public contract.
+
+### Services and transactions
+
+- transaction ownership;
+- commit and rollback behavior;
+- lock ordering;
+- concurrent session creation;
+- inactive-device behavior;
+- duplicate source-message handling;
+- session lifecycle transitions;
+- runtime-state consistency;
+- partial-write risks;
+- exception translation;
+- session reuse after failed operations;
+- timezone handling.
+
+### Repositories and SQLAlchemy
+
+- repository transaction boundaries;
+- query correctness;
+- locking semantics;
+- lazy loading;
+- expired attributes;
+- unbounded queries;
+- unnecessary round trips;
+- broad exception handling;
+- relationship loading;
+- identity-map assumptions;
+- coupling to FastAPI or HTTP concerns.
+
+### PostgreSQL and Alembic
+
+- exact ORM-to-migration parity;
+- primary keys;
+- unique constraints;
+- check constraints;
+- foreign keys;
+- composite foreign keys;
+- delete behavior;
+- foreign-key indexes;
+- current query indexes;
+- future telemetry read-query indexes;
+- timestamp types;
+- numeric types;
+- expected raw-measurement growth;
+- migration upgrade and downgrade symmetry;
+- role privileges and protected-database safety.
+
+Do not create a migration during Phase A.
+
+### Security
+
+- tracked secrets;
+- environment-variable handling;
+- exception leakage;
+- URL, username, password, SQL, constraint-name, and connection-parameter
+  exposure;
+- unsafe serialization;
+- SQL injection risk;
+- mass-assignment risk;
+- unknown request fields;
+- integration-test database guards;
+- accidental connection to `airmonitor`;
+- missing authentication as a deployment limitation;
+- public-exposure risks;
+- sensitive generated files.
+
+### Performance
+
+- unnecessary database queries;
+- N+1 behavior;
+- lock duration;
+- connection and session lifecycle;
+- missing or redundant indexes;
+- expensive count or offset patterns;
+- future pagination requirements;
+- large raw-measurement tables;
+- response payload growth;
+- application import and startup cost.
+
+### Tests
+
+- behavioral coverage;
+- false-positive tests;
+- excessive implementation coupling;
+- fragile AST/source tests;
+- mock-only confidence;
+- transaction and rollback coverage;
+- concurrency coverage;
+- test-order independence;
+- dependency override cleanup;
+- environment isolation;
+- false skips;
+- guarded PostgreSQL integration behavior;
+- credential-safe failures;
+- resource cleanup;
+- missing regression scenarios.
+
+### Configuration and dependencies
+
+- settings design;
+- default values;
+- environment precedence;
+- unsafe defaults;
+- dependency pinning;
+- unused dependencies;
+- package compatibility;
+- reproducibility;
+- deployment readiness.
+
+### Project and Git hygiene
+
+- `.gitignore`;
+- tracked generated files;
+- databases;
+- certificates;
+- virtual environments;
+- caches;
+- secrets;
+- duplicated files;
+- obsolete scaffolding;
+- documentation drift;
+- branch and CI readiness.
+
+### Product readiness
+
+The audit must separately report what is still required for:
+
+- telemetry read endpoints;
+- cursor pagination;
+- API authentication;
+- ESP32 integration;
+- frontend v2;
+- CORS;
+- Docker;
+- CI;
+- logging and observability;
+- aggregation, AQI, and NowCast.
+
+The review must classify findings as:
+
+- critical;
+- high;
+- medium;
+- low;
+- informational.
+
+Each finding must contain:
+
+1. stable finding ID;
+2. severity;
+3. confidence level;
+4. exact file and line range;
+5. affected component;
+6. factual evidence;
+7. reproduction scenario or static proof;
+8. real user, data, security, or maintenance impact;
+9. minimal recommended fix;
+10. required regression test;
+11. API compatibility impact;
+12. database or migration impact;
+13. whether it should be fixed in Sprint 8;
+14. whether further verification is required.
+
+A concern must not be reported as a confirmed bug unless it is supported by
+code evidence, a failing test, a reproducible scenario, or a documented
+invariant violation.
+
+Potential improvements, preferences, and speculative refactors must be clearly
+separated from confirmed defects.
+
+Allowed changes during Phase A:
 
 - `AGENTS.md`;
-- files inside `backend/`.
+- one audit report:
+  `docs/reviews/sprint-8-full-codebase-audit.md`.
 
-Legacy AirMonitor v1 files are read-only reference material and must not be
-modified.
+No ADR is required during the initial review.
 
-Required architecture:
+Do not:
 
-- preserve the current FastAPI application and `/health` endpoint;
-- register all new routes under `/api/v1`;
-- use separate Pydantic request and response schemas;
-- configure request schemas to reject unknown fields;
-- configure ORM response schemas to read scalar model attributes safely;
-- use explicit response models and status codes;
-- add dependency providers for sessions, services, and read-only query
-  services;
-- create one AsyncSession per HTTP request;
-- session dependencies must yield and close sessions but must not commit or
-  roll back successful service operations;
-- write routes must call the existing Sprint 6 services directly without
-  performing preliminary database queries;
-- read routes must use read-only query services rather than repositories
-  directly;
-- query services must not commit, roll back, open write transactions, or use
-  row-level locks;
-- routes must not contain SQLAlchemy statements, transaction management, or
-  business-state checks;
-- centralize domain-exception to HTTP-response mapping;
-- centralize FastAPI request-validation error formatting;
-- do not expose SQL, table names, connection URLs, credentials, tracebacks, or
-  raw IntegrityError messages;
-- preserve the existing Sprint 6 duplicate-source behavior:
-  duplicate non-null source_message_id values produce
-  DuplicateSourceMessageError;
-- preserve all existing repository and service behavior.
+- modify production code;
+- modify tests;
+- add endpoints;
+- add schemas;
+- add repositories or services;
+- modify ORM models;
+- modify Alembic;
+- create a migration;
+- connect to PostgreSQL;
+- run SQL;
+- create or drop databases;
+- modify environment variables;
+- modify frontend or firmware;
+- modify legacy files;
+- install or update dependencies;
+- run automatic formatters that write files;
+- perform Git write operations.
 
-Approved HTTP status behavior:
+Codex must not perform Git staging, commit, push, reset, restore, clean, branch,
+worktree, merge, rebase, cherry-pick, tag, or configuration operations.
 
-- successful resource creation: `201 Created`;
-- successful read or state transition: `200 OK`;
-- invalid request body, path, or query data: `422 Unprocessable Entity`;
-- missing device or active session: `404 Not Found`;
-- duplicate device UID: `409 Conflict`;
-- inactive device: `409 Conflict`;
-- existing active session: `409 Conflict`;
-- duplicate source message: `409 Conflict`;
-- invalid session transition or timestamp: `409 Conflict`;
-- missing runtime state or another broken internal invariant: safe
-  `500 Internal Server Error` without internal details.
 
-Approved error envelope:
-
-```json
-{
-  "error": {
-    "code": "stable_machine_readable_code",
-    "message": "Safe human-readable message.",
-    "details": null
-  }
-}
 ## Sensitive files
 
 Never open, read, display, copy, modify, or include content from:
@@ -182,53 +372,38 @@ py -3.13 -m venv backend/.venv
 
 ## Definition of done
 
-Sprint 7 is complete when:
+Sprint 8 Phase A is complete when:
 
-1. All eight approved `/api/v1` endpoints exist.
-2. The existing `/health` endpoint still works.
-3. Request and response Pydantic schemas are separated.
-4. Unknown request fields are rejected.
-5. Path device IDs must be positive.
-6. Coordinate limits and coordinate-pair rules are enforced.
-7. Naive datetime values are rejected.
-8. Decimal-backed values have stable tested JSON representations.
-9. Every endpoint declares an explicit response model.
-10. Creation endpoints return 201.
-11. Read and transition endpoints return 200.
-12. Write routes use Sprint 6 services.
-13. Read routes use read-only query services.
-14. Routes contain no SQLAlchemy statements.
-15. Routes contain no transaction management.
-16. Routes do not call repositories directly.
-17. One AsyncSession is created per request.
-18. Session dependencies do not automatically commit service operations.
-19. Domain exceptions are mapped centrally.
-20. Validation errors use the approved error envelope.
-21. Expected 404, 409, and 422 responses are represented in OpenAPI.
-22. Internal database details are never returned to clients.
-23. Application import performs no database connection.
-24. Application startup performs no migration or metadata creation.
-25. Offline route tests use dependency overrides and no PostgreSQL.
-26. OpenAPI generation is tested.
-27. The current backend baseline remains passing.
-28. The guarded PostgreSQL HTTP integration suite passes.
-29. The integration suite uses only AIRMONITOR_API_TEST_DATABASE_URL.
-30. The full HTTP lifecycle passes on a disposable database.
-31. Duplicate device, inactive device, second session, duplicate measurement,
-    invalid request, completion, cancellation, and post-completion rejection
-    are covered.
-32. Persisted rows and rollback behavior are verified.
-33. The disposable database is removed after verification.
-34. The protected `airmonitor` database is not connected to or modified.
-35. ORM models are unchanged.
-36. Existing repositories and transactional services are unchanged unless a
-    separately approved blocking defect is found.
-37. No Alembic revision is created.
-38. Alembic remains at sole head a4f9c2e7d1b6.
-39. pip check passes.
-40. compileall passes.
-41. git diff --check passes.
-42. Scope, generated-file, revision-count, and secret audits pass.
-43. Legacy files, frontend, firmware, `.env`, certificates, keys, databases,
-    and dumps are not modified or committed.
-44. Codex performs no Git write operation.
+1. The complete AirMonitor v2 backend architecture has been reviewed.
+2. Every production Python file has been inspected.
+3. Every backend test file has been inspected.
+4. ORM models and the sole Alembic revision have been compared field by field.
+5. FastAPI routes, schemas, dependencies, exception handlers, and OpenAPI have
+   been reviewed.
+6. Services and repositories have been reviewed for transaction and locking
+   correctness.
+7. Security and credential-leak risks have been reviewed.
+8. PostgreSQL constraints and indexes have been inventoried exactly.
+9. Current and future query patterns have been mapped to index coverage.
+10. Test quality and missing regression scenarios have been reviewed.
+11. Configuration, dependencies, `.gitignore`, and repository hygiene have
+    been reviewed.
+12. Legacy files remain unchanged.
+13. No production file, test, migration, environment variable, or database has
+    been modified.
+14. Every confirmed finding contains evidence, impact, fix, and regression-test
+    guidance.
+15. Speculative improvements are separated from confirmed defects.
+16. Findings are classified as critical, high, medium, low, or informational.
+17. A prioritized stabilization plan is included.
+18. Readiness gaps for read API, authentication, ESP32, frontend, Docker, CI,
+    CORS, aggregation, and observability are documented.
+19. The report explicitly states which findings should be fixed immediately
+    and which should be deferred.
+20. The report is created at
+    `docs/reviews/sprint-8-full-codebase-audit.md`.
+21. The existing baseline tests remain unchanged.
+22. `git diff --check` passes.
+23. Generated-file, sensitive-path, and secret audits pass.
+24. No PostgreSQL connection occurs.
+25. Codex performs no Git write operation.
