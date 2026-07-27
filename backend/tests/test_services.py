@@ -985,6 +985,35 @@ async def test_record_measurement_updates_counter_and_last_seen_atomically() -> 
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("field_name", ["pm1", "pm25", "pm10"])
+@pytest.mark.parametrize(
+    "value",
+    [float("inf"), float("-inf"), float("nan")],
+    ids=["positive-infinity", "negative-infinity", "nan"],
+)
+async def test_record_measurement_rejects_non_finite_pm_before_transaction(
+    field_name: str,
+    value: float,
+) -> None:
+    harness = _measurement_service_harness()
+
+    with pytest.raises(ValueError, match=rf"{field_name} must be finite"):
+        await harness.service.record_measurement(
+            device_id=DEVICE_ID,
+            measured_at=MEASURED_AT,
+            **{field_name: value},
+        )
+
+    harness.session.begin.assert_not_called()
+    harness.device_repository.get_by_id_for_update.assert_not_awaited()
+    harness.runtime_state_repository.get_for_update.assert_not_awaited()
+    harness.session_repository.get_by_id_for_update.assert_not_awaited()
+    harness.measurement_repository.get_by_source_message_id.assert_not_awaited()
+    harness.measurement_repository.create.assert_not_awaited()
+    harness.session_repository.increment_sample_count.assert_not_awaited()
+
+
+@pytest.mark.anyio
 async def test_record_measurement_allows_null_source_message_id() -> None:
     harness = _measurement_service_harness()
     _prepare_active_measurement_session(harness)

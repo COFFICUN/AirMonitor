@@ -19,7 +19,7 @@ AwareDatetime = Annotated[datetime, AfterValidator(require_timezone)]
 class RequestModel(BaseModel):
     """Base for request bodies with a closed field contract."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class ORMResponseModel(BaseModel):

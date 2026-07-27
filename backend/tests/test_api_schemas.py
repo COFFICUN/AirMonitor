@@ -229,6 +229,39 @@ def test_measurement_nonnegative_fields_reject_negative_values(
     assert raised.value.errors()[0]["loc"] == (field_name,)
 
 
+@pytest.mark.parametrize("field_name", ["pm1", "pm25", "pm10"])
+@pytest.mark.parametrize(
+    "raw_value",
+    ["1e999", "-1e999", "NaN", "Infinity", "-Infinity"],
+)
+def test_measurement_request_rejects_non_finite_pm_json(
+    field_name: str,
+    raw_value: str,
+) -> None:
+    payload = (
+        '{"measured_at":"2026-07-23T08:30:00Z",'
+        f'"{field_name}":{raw_value}}}'
+    )
+
+    with pytest.raises(ValidationError) as raised:
+        MeasurementCreateRequest.model_validate_json(payload)
+
+    assert raised.value.errors()[0]["loc"] == (field_name,)
+
+
+@pytest.mark.parametrize("field_name", ["pm1", "pm25", "pm10"])
+@pytest.mark.parametrize("value", [0.0, 1e308])
+def test_measurement_request_accepts_finite_pm_values(
+    field_name: str,
+    value: float,
+) -> None:
+    request = MeasurementCreateRequest.model_validate(
+        {"measured_at": NOW, field_name: value}
+    )
+
+    assert getattr(request, field_name) == value
+
+
 @pytest.mark.parametrize(
     ("field_name", "valid_values", "invalid_values"),
     [

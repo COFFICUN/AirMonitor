@@ -109,13 +109,21 @@ async def _request(
     path: str,
     *,
     json: dict[str, object] | None = None,
+    content: str | bytes | None = None,
+    headers: dict[str, str] | None = None,
 ):
     transport = ASGITransport(app=application)
     async with AsyncClient(
         transport=transport,
         base_url="http://testserver",
     ) as client:
-        return await client.request(method, path, json=json)
+        return await client.request(
+            method,
+            path,
+            json=json,
+            content=content,
+            headers=headers,
+        )
 
 
 @pytest.mark.anyio
@@ -485,6 +493,45 @@ async def test_record_measurement_calls_service_with_validated_payload(
         is_valid=True,
         validation_note=None,
     )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "raw_value",
+    ["1e999", "-1e999", "NaN", "Infinity", "-Infinity"],
+)
+async def test_non_finite_measurement_json_uses_safe_422_before_service(
+    application: FastAPI,
+    raw_value: str,
+) -> None:
+    service = SimpleNamespace(
+        record_measurement=AsyncMock(return_value=_measurement())
+    )
+    application.dependency_overrides[get_measurement_service] = (
+        lambda: service
+    )
+    payload = (
+        '{"measured_at":"2026-07-23T08:30:00Z",'
+        f'"pm25":{raw_value}}}'
+    )
+
+    response = await _request(
+        application,
+        "POST",
+        "/api/v1/devices/7/measurements",
+        content=payload,
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "error": {
+            "code": "request_validation_error",
+            "message": "Request validation failed.",
+            "details": None,
+        }
+    }
+    service.record_measurement.assert_not_awaited()
 
 
 @pytest.mark.anyio

@@ -1,6 +1,7 @@
 """Transactional measurement-session and raw-measurement operations."""
 
 from datetime import UTC, datetime
+from math import isfinite
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -136,6 +137,7 @@ class MeasurementService:
         validation_note: str | None = None,
     ) -> RawMeasurement:
         """Raise ``DuplicateSourceMessageError`` for a duplicate non-null ID."""
+        _validate_finite_pm_values(pm1=pm1, pm25=pm25, pm10=pm10)
         try:
             async with self._session.begin():
                 device = (
@@ -329,3 +331,18 @@ def _validate_session_ownership(
             session_id=measurement_session.id,
             device_id=device_id,
         )
+
+
+def _validate_finite_pm_values(
+    *,
+    pm1: float | None,
+    pm25: float | None,
+    pm10: float | None,
+) -> None:
+    for field_name, value in (
+        ("pm1", pm1),
+        ("pm25", pm25),
+        ("pm10", pm10),
+    ):
+        if value is not None and not isfinite(value):
+            raise ValueError(f"{field_name} must be finite")
