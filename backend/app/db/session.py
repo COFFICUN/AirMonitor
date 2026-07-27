@@ -1,7 +1,5 @@
 """Asynchronous database engine and session construction."""
 
-from functools import lru_cache
-
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -9,7 +7,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from app.core.config import Settings, get_settings
+from app.core.config import Settings
 
 
 def create_database_engine(settings: Settings) -> AsyncEngine:
@@ -33,13 +31,13 @@ def create_session_factory(
     )
 
 
-@lru_cache
-def get_database_engine() -> AsyncEngine:
-    """Return the lazily constructed shared database engine."""
-    return create_database_engine(get_settings())
+def get_database_engine(settings: Settings) -> AsyncEngine:
+    """Create the engine owned by one application instance."""
+    return create_database_engine(settings)
 
 
-@lru_cache
-def get_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Return the shared asynchronous session factory."""
-    return create_session_factory(get_database_engine())
+def get_session_factory(
+    engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    """Create the session factory owned by one application instance."""
+    return create_session_factory(engine)

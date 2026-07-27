@@ -3,10 +3,15 @@
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.session import get_session_factory
+
+def get_session_factory(
+    request: Request,
+) -> async_sessionmaker[AsyncSession]:
+    """Resolve the session factory owned by the request application."""
+    return request.app.state.session_factory
 
 
 async def get_db_session(
