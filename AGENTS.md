@@ -20,51 +20,75 @@ PostgreSQL, Pydantic, and pytest.
 
 ## Current active task
 
-Sprint 8 Phase C2A — Domain Boundaries.
+Sprint 8 Phase C2B — API Error Contract and Production Hardening.
 
 Implement only:
 
-- AUDIT-003: measurement timestamps and session terminal timestamps must form
-  one consistent interval;
-- AUDIT-004: public API integer inputs mapped to PostgreSQL INTEGER must respect
-  the signed int32 range.
+- AUDIT-005: complete the public error envelope for framework HTTP errors and
+  unexpected server errors, and align OpenAPI documentation;
+- AUDIT-006: reject unsafe production settings and hide SQL parameters.
 
-Read this report completely before changing code:
+Read completely before changing code:
 
 docs/reviews/sprint-8-full-codebase-audit.md
 
-Phase C1 is already complete. Preserve its application-owned database state,
-lifespan disposal, and non-finite telemetry validation.
+Preserve all completed Phase C1 and C2A behavior.
 
-## Approved domain decisions
+## Approved HTTP error policy
 
-### Session chronology
+Framework-level errors must use the existing ErrorResponse envelope.
 
-Use a strict timestamp policy with no implicit clock-skew allowance:
+Required mappings:
 
-- measurement.measured_at must be greater than or equal to
-  session.started_at;
-- complete/cancel ended_at must be greater than or equal to the latest
-  persisted measurement.measured_at;
-- equality is valid;
-- the rule applies to both completed and cancelled sessions;
-- contradictory timestamps use the existing conflict/domain-error mechanism
-  and the existing safe 409 envelope.
+- unknown route:
+  - status 404;
+  - code `not_found`;
+  - safe fixed message;
+- method not allowed:
+  - status 405;
+  - code `method_not_allowed`;
+  - safe fixed message;
+  - preserve the `Allow` header;
+- unexpected application/server failure:
+  - status 500;
+  - code `internal_server_error`;
+  - safe fixed message.
 
-Do not add a configurable tolerance or silently adjust timestamps.
+Never expose:
 
-### PostgreSQL INTEGER range
+- exception text;
+- traceback content;
+- SQL statements or parameters;
+- database URLs;
+- usernames or passwords;
+- constraint names;
+- internal filesystem paths;
+- sentinel values included in thrown exceptions.
 
-Public integer inputs backed by PostgreSQL INTEGER must not exceed:
+Existing domain-error, validation-error, and IntegrityError behavior must remain
+unchanged.
 
-2_147_483_647
+All eight /api/v1 operations must document a generic safe 500 response using
+the existing ErrorResponse schema. Do not change operation IDs, routes, request
+models, success responses, or successful status codes.
 
-Keep the current lower bounds:
+## Approved production configuration policy
 
-- identifiers remain greater than zero;
-- particle counters remain greater than or equal to zero.
+When environment is production, settings validation must reject:
 
-Do not migrate any column to BIGINT in this phase.
+- debug=true;
+- database_echo=true;
+- the unchanged built-in development database URL.
+
+The async SQLAlchemy engine must be constructed with parameter hiding enabled:
+
+hide_parameters=True
+
+This applies independently of environment.
+
+Development and test behavior must remain compatible.
+
+Do not print, log, inspect, or expose database URL values.
 
 ## Required workflow
 
@@ -73,113 +97,106 @@ skills.
 
 Use strict test-driven development:
 
-1. inspect the current implementation;
+1. inspect current handlers, settings, engine creation, and OpenAPI responses;
 2. add focused failing regression tests;
-3. prove each test fails for the intended defect;
-4. make the smallest coherent implementation change;
+3. prove failures correspond to AUDIT-005 and AUDIT-006;
+4. implement the smallest coherent fix;
 5. rerun focused tests;
 6. run the complete offline backend suite;
 7. perform a bounded adversarial review;
 8. stop for manual external review.
 
-Do not implement before the RED tests are demonstrated.
+Do not implement before RED tests are demonstrated.
 
 ## Allowed production scope
 
-Changes are limited to files directly required for AUDIT-003 and AUDIT-004,
-primarily:
+Modify only files directly required, primarily:
 
-- backend/app/services/measurement.py
-- backend/app/repositories/measurement.py
-- backend/app/repositories/measurement_session.py
-- backend/app/schemas/_base.py
-- backend/app/schemas/measurements.py
-- backend/app/schemas/sessions.py
+- backend/app/api/errors.py
+- backend/app/api/responses.py
+- backend/app/api/router.py
+- backend/app/api/v1/router.py
 - backend/app/api/v1/endpoints/devices.py
 - backend/app/api/v1/endpoints/measurements.py
 - backend/app/api/v1/endpoints/sessions.py
-- backend/app/core/exceptions.py only if the existing domain-error mechanism
-  cannot represent chronology conflicts cleanly
+- backend/app/schemas/errors.py
+- backend/app/core/config.py
+- backend/app/db/session.py
+- backend/app/main.py
 
-Modify only the minimum necessary subset.
+Use only the minimum necessary subset.
 
 ## Allowed test scope
 
 Tests may be added or modified only where directly required, including:
 
-- backend/tests/test_api_schemas.py
-- backend/tests/test_api_routes.py
-- backend/tests/test_services.py
-- backend/tests/test_repositories.py
-- backend/tests/test_api_openapi.py
 - backend/tests/test_api_errors.py
-- backend/tests/test_api_integration.py only if existing guarded integration
-  behavior requires compatibility changes
+- backend/tests/test_api_openapi.py
+- backend/tests/test_api_routes.py
+- backend/tests/test_config.py
+- backend/tests/test_database.py
+- backend/tests/test_application_composition.py
 - one focused new test module if it materially improves clarity
 
-Do not modify integration guards or database cleanup policy.
+Do not modify integration guards or database cleanup behavior.
 
-## AUDIT-003 acceptance criteria
-
-Prove all of the following:
-
-1. A measurement before the active session start is rejected.
-2. A measurement exactly at session start is accepted.
-3. Completing a session before its latest measurement is rejected.
-4. Cancelling a session before its latest measurement is rejected.
-5. Ending exactly at the latest measurement timestamp is accepted.
-6. A failed chronology check leaves session state, runtime state, sample count,
-   and raw measurements unchanged.
-7. The latest-measurement check occurs inside the service-owned transaction
-   while the established device → runtime → session lock order is preserved.
-8. Record versus complete/cancel cannot create a measurement outside the
-   terminal interval under the existing lock order.
-9. Existing valid ingestion and session-transition behavior remains unchanged.
-10. Contradictory timestamp requests use the existing safe 409 envelope.
-
-Use the smallest query needed to retrieve the latest measurement timestamp.
-Do not introduce unbounded result loading.
-
-## AUDIT-004 acceptance criteria
+## AUDIT-005 acceptance criteria
 
 Prove all of the following:
 
-1. Path identifiers accept 2_147_483_647.
-2. Path identifiers reject 2_147_483_648 with the existing safe 422 envelope.
-3. All six particle-counter fields accept 2_147_483_647.
-4. All six particle-counter fields reject 2_147_483_648.
-5. Rejected values never invoke the endpoint service or repository.
-6. Existing lower-bound behavior remains unchanged.
-7. OpenAPI exposes the integer maximum.
-8. No API route, operation ID, successful response, or valid request behavior
-   changes.
-9. No database migration is added.
+1. Unknown routes return the ErrorResponse envelope with status 404.
+2. Wrong methods return the ErrorResponse envelope with status 405.
+3. The 405 response preserves the correct Allow header.
+4. A synthetic RuntimeError returns a sanitized 500 ErrorResponse.
+5. A synthetic SQLAlchemy non-IntegrityError returns the same sanitized 500.
+6. Exception messages, SQL, URLs, credentials, constraint names, paths, and
+   sentinel values do not appear in response bodies.
+7. Existing domain-error responses remain unchanged.
+8. Existing request-validation responses remain unchanged.
+9. Existing IntegrityError responses remain unchanged.
+10. All eight /api/v1 operations document the generic ErrorResponse 500.
+11. OpenAPI operation count, paths, operation IDs, request models, successful
+    status codes, and successful response schemas remain unchanged.
+12. Debug-mode behavior is not relied on for production safety.
 
-Prefer shared constrained aliases or schema definitions over repeated magic
-numbers when that can be done without unrelated refactoring.
+## AUDIT-006 acceptance criteria
+
+Prove all of the following:
+
+1. Production plus debug=true is rejected during Settings validation.
+2. Production plus database_echo=true is rejected.
+3. Production plus the unchanged built-in database URL is rejected.
+4. A production configuration with debug=false, echo=false, and an explicit
+   non-default PostgreSQL+asyncpg URL is accepted.
+5. Development/test configurations retain current behavior.
+6. Engine construction always passes hide_parameters=True.
+7. Engine construction remains lazy and does not connect.
+8. No database URL or credential is printed into failures or captured logs.
+9. Application-owned engine/session behavior from Phase C1 remains intact.
+10. No database, migration, or API success contract changes.
 
 ## Explicitly forbidden
 
 Do not:
 
 - implement telemetry read endpoints;
-- implement AUDIT-005 or later findings;
-- change the generic error envelope;
-- change production debug/echo settings;
-- change authentication, authorization, CORS, Docker, CI, logging, or
-  observability;
-- add clock-skew tolerance;
-- change session status semantics;
-- migrate INTEGER columns to BIGINT;
+- implement AUDIT-008 or later findings;
+- implement authentication or authorization;
+- add CORS;
+- add rate limiting;
+- add Docker or CI;
+- introduce structured logging or observability architecture;
+- redesign the error schema;
+- change existing domain error codes;
+- change chronology or integer-boundary behavior;
+- change routes or operation IDs;
 - create or modify Alembic revisions;
-- modify ORM columns, constraints, indexes, foreign keys, or relationships;
+- modify ORM models, constraints, indexes, relationships, or database types;
 - connect to PostgreSQL;
 - create, inspect, migrate, clean, or drop a database;
-- set or read database URL values;
 - install or update dependencies;
 - modify requirements;
-- modify the audit report;
-- modify README or unrelated documentation;
+- modify the audit report or README;
 - modify Agent Skills;
 - modify legacy files, firmware, secrets, certificates, keys, or .env files;
 - perform Git write operations.
@@ -196,50 +213,52 @@ Do not change this environment.
 
 Run tests with:
 
-- `-B`;
-- `-p no:cacheprovider`;
-- live database opt-ins absent;
-- all PostgreSQL integration suites skipped.
+- -B;
+- -p no:cacheprovider;
+- no live PostgreSQL opt-ins;
+- no dependency installation.
+
+Do not read or print database URL values.
 
 ## Required verification
 
 At minimum run:
 
-1. focused service chronology tests;
-2. focused API/schema int32 tests;
-3. affected existing service, repository, route, schema, and OpenAPI tests;
-4. the complete offline backend test suite;
-5. pip check;
-6. guarded offline OpenAPI generation;
-7. import/OpenAPI no-connection guards;
-8. source compilation without repository bytecode;
-9. git diff --check;
-10. sensitive/generated-path checks;
-11. final read-only diff and status inspection.
+1. focused framework/generic error tests;
+2. focused production-settings tests;
+3. focused engine-construction tests;
+4. affected error, route, config, database, OpenAPI, and composition tests;
+5. the complete offline backend suite;
+6. pip check;
+7. guarded offline OpenAPI generation;
+8. import/factory/lifespan/OpenAPI no-connection guards;
+9. in-memory/source compilation without repository bytecode;
+10. git diff --check;
+11. sensitive/generated-path checks;
+12. final read-only diff and status inspection.
 
-Expected API inventory remains:
+Expected OpenAPI inventory remains:
 
 - nine total operations;
-- eight under /api/v1;
+- eight operations under /api/v1;
 - one /health operation;
 - unique operation IDs.
 
 ## Definition of done
 
-Phase C2A is complete only when:
+Phase C2B is complete only when:
 
-- RED tests reproduce AUDIT-003 and AUDIT-004;
+- RED tests reproduce AUDIT-005 and AUDIT-006;
 - both findings are fixed;
-- strict chronology policy is enforced;
-- int32 public boundaries are enforced;
-- existing valid behavior remains compatible;
-- the full offline suite passes;
+- framework and generic failures use the approved safe envelope;
+- unsafe production settings fail closed;
+- SQL parameters are hidden;
+- existing domain/validation/integrity behavior remains compatible;
+- the complete offline suite passes;
 - OpenAPI inventory remains unchanged;
-- no PostgreSQL connection occurred;
-- no migration or ORM change exists;
-- no unrelated finding or feature was implemented;
-- no dependency, legacy, sensitive, or documentation file was changed;
-- Codex performed no Git write operation;
-- final response lists failing tests, changed files, commands, results,
-  compatibility impact, limitations, and exact Git status.
+- no PostgreSQL connection occurs;
+- no migration, ORM, dependency, legacy, or unrelated file changes;
+- Codex performs no Git write operation;
+- the final response lists RED failures, changed files, exact commands and
+  results, compatibility impact, remaining limitations, and final Git status.
 '@ | Set-Content -Path ".\AGENTS.md" -Encoding UTF8
