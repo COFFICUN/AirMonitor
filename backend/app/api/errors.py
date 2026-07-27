@@ -1,11 +1,13 @@
 """Central HTTP mappings for validation and domain failures."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.exceptions import (
     ActiveSessionAlreadyExistsError,
@@ -123,9 +125,31 @@ DOMAIN_ERROR_MAPPINGS: tuple[
         ),
     ),
 )
+INTERNAL_SERVER_ERROR_MAPPING = ErrorMapping(
+    status.HTTP_500_INTERNAL_SERVER_ERROR,
+    "internal_server_error",
+    "An internal server error occurred.",
+)
+FRAMEWORK_ERROR_MAPPINGS = {
+    status.HTTP_404_NOT_FOUND: ErrorMapping(
+        status.HTTP_404_NOT_FOUND,
+        "not_found",
+        "The requested resource was not found.",
+    ),
+    status.HTTP_405_METHOD_NOT_ALLOWED: ErrorMapping(
+        status.HTTP_405_METHOD_NOT_ALLOWED,
+        "method_not_allowed",
+        "The requested method is not allowed.",
+    ),
+    status.HTTP_500_INTERNAL_SERVER_ERROR: INTERNAL_SERVER_ERROR_MAPPING,
+}
 
 
-def _error_response(mapping: ErrorMapping) -> JSONResponse:
+def _error_response(
+    mapping: ErrorMapping,
+    *,
+    headers: Mapping[str, str] | None = None,
+) -> JSONResponse:
     return JSONResponse(
         status_code=mapping.status_code,
         content={
@@ -135,6 +159,7 @@ def _error_response(mapping: ErrorMapping) -> JSONResponse:
                 "details": None,
             }
         },
+        headers=headers,
     )
 
 
@@ -146,13 +171,7 @@ async def handle_domain_error(
     for error_type, mapping in DOMAIN_ERROR_MAPPINGS:
         if isinstance(error, error_type):
             return _error_response(mapping)
-    return _error_response(
-        ErrorMapping(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "internal_server_error",
-            "An internal server error occurred.",
-        )
-    )
+    return _error_response(INTERNAL_SERVER_ERROR_MAPPING)
 
 
 async def handle_request_validation_error(
@@ -174,13 +193,31 @@ async def handle_integrity_error(
     error: IntegrityError,
 ) -> JSONResponse:
     del request, error
-    return _error_response(
+    return _error_response(INTERNAL_SERVER_ERROR_MAPPING)
+
+
+async def handle_http_exception(
+    request: Request,
+    error: StarletteHTTPException,
+) -> JSONResponse:
+    del request
+    mapping = FRAMEWORK_ERROR_MAPPINGS.get(
+        error.status_code,
         ErrorMapping(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "internal_server_error",
-            "An internal server error occurred.",
-        )
+            error.status_code,
+            "http_error",
+            "The request could not be completed.",
+        ),
     )
+    return _error_response(mapping, headers=error.headers)
+
+
+async def handle_unexpected_error(
+    request: Request,
+    error: Exception,
+) -> JSONResponse:
+    del request, error
+    return _error_response(INTERNAL_SERVER_ERROR_MAPPING)
 
 
 def install_exception_handlers(application: FastAPI) -> None:
@@ -196,6 +233,14 @@ def install_exception_handlers(application: FastAPI) -> None:
     application.add_exception_handler(
         IntegrityError,
         handle_integrity_error,
+    )
+    application.add_exception_handler(
+        StarletteHTTPException,
+        handle_http_exception,
+    )
+    application.add_exception_handler(
+        Exception,
+        handle_unexpected_error,
     )
 
 

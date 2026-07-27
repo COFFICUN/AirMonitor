@@ -4,8 +4,9 @@ from collections.abc import Callable
 
 import pytest
 from fastapi import FastAPI
-from httpx2 import ASGITransport, AsyncClient
-from sqlalchemy.exc import IntegrityError
+from httpx2 import ASGITransport, AsyncClient, Response
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.errors import install_exception_handlers
 from app.core.exceptions import (
@@ -40,7 +41,145 @@ def _error_application(error_factory: Callable[[], Exception]) -> FastAPI:
     async def validated(item_id: int) -> dict[str, int]:
         return {"item_id": item_id}
 
+    @application.post("/write-only")
+    async def write_only() -> None:
+        return None
+
     return application
+
+
+SENSITIVE_ERROR_TEXT = (
+    "PHASE_C2B_SENTINEL "
+    "SELECT secret_column FROM secret_table "
+    "DATABASE_URL_MARKER SECRET_USERNAME SECRET_PASSWORD "
+    "uq_secret_constraint C:\\internal\\private.py traceback"
+)
+SENSITIVE_RESPONSE_MARKERS = (
+    "phase_c2b_sentinel",
+    "select secret_column",
+    "database_url_marker",
+    "secret_username",
+    "secret_password",
+    "uq_secret_constraint",
+    "c:\\internal\\private.py",
+    "traceback",
+)
+
+
+def _assert_sanitized_internal_server_error(response: Response) -> None:
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": {
+            "code": "internal_server_error",
+            "message": "An internal server error occurred.",
+            "details": None,
+        }
+    }
+    serialized = response.text.casefold()
+    for marker in SENSITIVE_RESPONSE_MARKERS:
+        assert marker not in serialized
+
+
+@pytest.mark.anyio
+async def test_unknown_route_uses_safe_not_found_envelope() -> None:
+    transport = ASGITransport(
+        app=_error_application(lambda: AssertionError("unused"))
+    )
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/unknown-route")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": {
+            "code": "not_found",
+            "message": "The requested resource was not found.",
+            "details": None,
+        }
+    }
+
+
+@pytest.mark.anyio
+async def test_wrong_method_uses_safe_envelope_and_preserves_allow() -> None:
+    transport = ASGITransport(
+        app=_error_application(lambda: AssertionError("unused"))
+    )
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/write-only")
+
+    assert response.status_code == 405
+    assert response.headers["allow"] == "POST"
+    assert response.json() == {
+        "error": {
+            "code": "method_not_allowed",
+            "message": "The requested method is not allowed.",
+            "details": None,
+        }
+    }
+
+
+@pytest.mark.anyio
+async def test_runtime_errors_use_sanitized_internal_server_envelope() -> None:
+    transport = ASGITransport(
+        app=_error_application(
+            lambda: RuntimeError(SENSITIVE_ERROR_TEXT)
+        ),
+        raise_app_exceptions=False,
+    )
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/failure")
+
+    _assert_sanitized_internal_server_error(response)
+
+
+@pytest.mark.anyio
+async def test_sqlalchemy_non_integrity_errors_use_sanitized_envelope() -> None:
+    transport = ASGITransport(
+        app=_error_application(
+            lambda: SQLAlchemyError(SENSITIVE_ERROR_TEXT)
+        ),
+        raise_app_exceptions=False,
+    )
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/failure")
+
+    _assert_sanitized_internal_server_error(response)
+
+
+@pytest.mark.anyio
+async def test_framework_http_500_uses_sanitized_internal_envelope() -> None:
+    transport = ASGITransport(
+        app=_error_application(
+            lambda: StarletteHTTPException(
+                status_code=500,
+                detail=SENSITIVE_ERROR_TEXT,
+            )
+        ),
+        raise_app_exceptions=False,
+    )
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/failure")
+
+    _assert_sanitized_internal_server_error(response)
 
 
 @pytest.mark.anyio

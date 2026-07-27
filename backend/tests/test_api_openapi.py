@@ -32,6 +32,62 @@ PARTICLE_COUNTER_FIELDS = {
     "pc5_0",
     "pc10",
 }
+EXPECTED_OPERATION_CONTRACTS = {
+    ("/api/v1/devices", "post"): (
+        "create_device",
+        "201",
+        "DeviceResponse",
+        "DeviceCreateRequest",
+    ),
+    ("/api/v1/devices/{device_id}", "get"): (
+        "get_device",
+        "200",
+        "DeviceResponse",
+        None,
+    ),
+    ("/api/v1/devices/{device_id}/status", "patch"): (
+        "set_device_status",
+        "200",
+        "DeviceResponse",
+        "DeviceStatusRequest",
+    ),
+    ("/api/v1/devices/{device_id}/sessions", "post"): (
+        "start_measurement_session",
+        "201",
+        "SessionResponse",
+        "SessionCreateRequest",
+    ),
+    ("/api/v1/devices/{device_id}/sessions/active", "get"): (
+        "get_active_measurement_session",
+        "200",
+        "SessionResponse",
+        None,
+    ),
+    (
+        "/api/v1/devices/{device_id}/sessions/active/complete",
+        "post",
+    ): (
+        "complete_active_measurement_session",
+        "200",
+        "SessionResponse",
+        "SessionTransitionRequest",
+    ),
+    (
+        "/api/v1/devices/{device_id}/sessions/active/cancel",
+        "post",
+    ): (
+        "cancel_active_measurement_session",
+        "200",
+        "SessionResponse",
+        "SessionTransitionRequest",
+    ),
+    ("/api/v1/devices/{device_id}/measurements", "post"): (
+        "record_raw_measurement",
+        "201",
+        "MeasurementResponse",
+        "MeasurementCreateRequest",
+    ),
+}
 
 
 def test_openapi_generation_is_connection_free_and_covers_exact_scope() -> None:
@@ -49,13 +105,19 @@ def test_openapi_generation_is_connection_free_and_covers_exact_scope() -> None:
         application = create_application(Settings(_env_file=None))
         schema = application.openapi()
 
-    actual_operations = {
+    all_operations = {
         (path, method)
         for path, path_item in schema["paths"].items()
-        if path.startswith("/api/v1")
         for method in path_item
         if method in {"get", "post", "put", "patch", "delete"}
     }
+    actual_operations = {
+        operation
+        for operation in all_operations
+        if operation[0].startswith("/api/v1")
+    }
+    assert len(all_operations) == 9
+    assert len(actual_operations) == 8
     assert actual_operations == EXPECTED_OPERATIONS
     assert "/health" in schema["paths"]
     assert all(not mock.called for mock in connection_mocks)
@@ -85,12 +147,17 @@ def test_openapi_documents_success_and_expected_error_models() -> None:
     schema = create_application(Settings(_env_file=None)).openapi()
 
     expected_responses = {
-        ("/api/v1/devices", "post"): {"201", "409", "422"},
-        ("/api/v1/devices/{device_id}", "get"): {"200", "404", "422"},
+        ("/api/v1/devices", "post"): {"201", "409", "422", "500"},
+        ("/api/v1/devices/{device_id}", "get"): {
+            "200",
+            "404",
+            "422",
+            "500",
+        },
         (
             "/api/v1/devices/{device_id}/status",
             "patch",
-        ): {"200", "404", "422"},
+        ): {"200", "404", "422", "500"},
         (
             "/api/v1/devices/{device_id}/sessions",
             "post",
@@ -98,7 +165,7 @@ def test_openapi_documents_success_and_expected_error_models() -> None:
         (
             "/api/v1/devices/{device_id}/sessions/active",
             "get",
-        ): {"200", "404", "422"},
+        ): {"200", "404", "422", "500"},
         (
             "/api/v1/devices/{device_id}/sessions/active/complete",
             "post",
@@ -121,6 +188,42 @@ def test_openapi_documents_success_and_expected_error_models() -> None:
                 "application/json"
             ]["schema"]
             assert response_schema["$ref"].endswith("/ErrorResponse")
+        assert operation["responses"]["500"]["description"] == (
+            "An unexpected internal server error occurred."
+        )
+
+
+def test_openapi_preserves_exact_public_operation_contracts() -> None:
+    schema = create_application(Settings(_env_file=None)).openapi()
+
+    for (
+        path,
+        method,
+    ), (
+        operation_id,
+        success_code,
+        success_schema_name,
+        request_schema_name,
+    ) in EXPECTED_OPERATION_CONTRACTS.items():
+        operation = schema["paths"][path][method]
+        assert operation["operationId"] == operation_id
+        assert {
+            code for code in operation["responses"] if code.startswith("2")
+        } == {success_code}
+        success_schema = operation["responses"][success_code]["content"][
+            "application/json"
+        ]["schema"]
+        assert success_schema["$ref"].endswith(
+            f"/{success_schema_name}"
+        )
+
+        request_body = operation.get("requestBody")
+        if request_schema_name is None:
+            assert request_body is None
+        else:
+            assert request_body["content"]["application/json"]["schema"][
+                "$ref"
+            ].endswith(f"/{request_schema_name}")
 
 
 def test_every_operation_declares_a_concrete_success_schema() -> None:
