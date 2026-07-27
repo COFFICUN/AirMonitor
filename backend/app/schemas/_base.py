@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, ConfigDict
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 
 def require_timezone(value: datetime) -> datetime:
@@ -14,6 +14,11 @@ def require_timezone(value: datetime) -> datetime:
 
 
 AwareDatetime = Annotated[datetime, AfterValidator(require_timezone)]
+POSTGRES_INTEGER_MAX = 2_147_483_647
+NonNegativePostgresInteger = Annotated[
+    int,
+    Field(ge=0, le=POSTGRES_INTEGER_MAX),
+]
 
 
 class RequestModel(BaseModel):
@@ -28,4 +33,10 @@ class ORMResponseModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-__all__ = ["AwareDatetime", "ORMResponseModel", "RequestModel"]
+__all__ = [
+    "AwareDatetime",
+    "NonNegativePostgresInteger",
+    "ORMResponseModel",
+    "POSTGRES_INTEGER_MAX",
+    "RequestModel",
+]

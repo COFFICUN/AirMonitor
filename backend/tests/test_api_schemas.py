@@ -23,6 +23,15 @@ from app.schemas.sessions import (
 
 
 NOW = datetime(2026, 7, 23, 8, 30, tzinfo=UTC)
+POSTGRES_INTEGER_MAX = 2_147_483_647
+PARTICLE_COUNTER_FIELDS = (
+    "pc0_3",
+    "pc0_5",
+    "pc1_0",
+    "pc2_5",
+    "pc5_0",
+    "pc10",
+)
 
 
 @pytest.mark.parametrize(
@@ -224,6 +233,35 @@ def test_measurement_nonnegative_fields_reject_negative_values(
     with pytest.raises(ValidationError) as raised:
         MeasurementCreateRequest.model_validate(
             {"measured_at": NOW, field_name: -1}
+        )
+
+    assert raised.value.errors()[0]["loc"] == (field_name,)
+
+
+@pytest.mark.parametrize("field_name", PARTICLE_COUNTER_FIELDS)
+def test_particle_counter_accepts_postgres_integer_max(
+    field_name: str,
+) -> None:
+    request = MeasurementCreateRequest.model_validate(
+        {
+            "measured_at": NOW,
+            field_name: POSTGRES_INTEGER_MAX,
+        }
+    )
+
+    assert getattr(request, field_name) == POSTGRES_INTEGER_MAX
+
+
+@pytest.mark.parametrize("field_name", PARTICLE_COUNTER_FIELDS)
+def test_particle_counter_rejects_value_above_postgres_integer_max(
+    field_name: str,
+) -> None:
+    with pytest.raises(ValidationError) as raised:
+        MeasurementCreateRequest.model_validate(
+            {
+                "measured_at": NOW,
+                field_name: POSTGRES_INTEGER_MAX + 1,
+            }
         )
 
     assert raised.value.errors()[0]["loc"] == (field_name,)

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Path, status
 
 from app.api.dependencies import get_measurement_service
 from app.api.responses import error_responses
+from app.schemas._base import POSTGRES_INTEGER_MAX
 from app.schemas.measurements import (
     MeasurementCreateRequest,
     MeasurementResponse,
@@ -17,7 +18,14 @@ router = APIRouter(
     prefix="/devices/{device_id}/measurements",
     tags=["measurements"],
 )
-DeviceId = Annotated[int, Path(gt=0, description="Positive device ID")]
+DeviceId = Annotated[
+    int,
+    Path(
+        gt=0,
+        le=POSTGRES_INTEGER_MAX,
+        description="Positive device ID",
+    ),
+]
 
 
 @router.post(

@@ -9,6 +9,7 @@ from app.api.dependencies import (
     get_device_service,
 )
 from app.api.responses import error_responses
+from app.schemas._base import POSTGRES_INTEGER_MAX
 from app.schemas.devices import (
     DeviceCreateRequest,
     DeviceResponse,
@@ -19,7 +20,14 @@ from app.services.queries import DeviceQueryService
 
 
 router = APIRouter(prefix="/devices", tags=["devices"])
-DeviceId = Annotated[int, Path(gt=0, description="Positive device ID")]
+DeviceId = Annotated[
+    int,
+    Path(
+        gt=0,
+        le=POSTGRES_INTEGER_MAX,
+        description="Positive device ID",
+    ),
+]
 
 
 @router.post(

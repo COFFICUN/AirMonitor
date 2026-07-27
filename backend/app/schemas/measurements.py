@@ -8,6 +8,7 @@ from pydantic import Field, model_validator
 
 from app.schemas._base import (
     AwareDatetime,
+    NonNegativePostgresInteger,
     ORMResponseModel,
     RequestModel,
 )
@@ -24,12 +25,12 @@ class MeasurementCreateRequest(RequestModel):
     pm1: float | None = Field(default=None, ge=0)
     pm25: float | None = Field(default=None, ge=0)
     pm10: float | None = Field(default=None, ge=0)
-    pc0_3: int | None = Field(default=None, ge=0)
-    pc0_5: int | None = Field(default=None, ge=0)
-    pc1_0: int | None = Field(default=None, ge=0)
-    pc2_5: int | None = Field(default=None, ge=0)
-    pc5_0: int | None = Field(default=None, ge=0)
-    pc10: int | None = Field(default=None, ge=0)
+    pc0_3: NonNegativePostgresInteger | None = None
+    pc0_5: NonNegativePostgresInteger | None = None
+    pc1_0: NonNegativePostgresInteger | None = None
+    pc2_5: NonNegativePostgresInteger | None = None
+    pc5_0: NonNegativePostgresInteger | None = None
+    pc10: NonNegativePostgresInteger | None = None
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     is_valid: bool = True

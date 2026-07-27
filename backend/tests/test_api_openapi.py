@@ -23,6 +23,15 @@ EXPECTED_OPERATIONS = {
     ),
     ("/api/v1/devices/{device_id}/measurements", "post"),
 }
+POSTGRES_INTEGER_MAX = 2_147_483_647
+PARTICLE_COUNTER_FIELDS = {
+    "pc0_3",
+    "pc0_5",
+    "pc1_0",
+    "pc2_5",
+    "pc5_0",
+    "pc10",
+}
 
 
 def test_openapi_generation_is_connection_free_and_covers_exact_scope() -> None:
@@ -130,3 +139,33 @@ def test_every_operation_declares_a_concrete_success_schema() -> None:
             "SessionResponse",
             "MeasurementResponse",
         }
+
+
+def test_openapi_exposes_postgres_integer_max_for_paths_and_particle_counters() -> None:
+    schema = create_application(Settings(_env_file=None)).openapi()
+
+    for path, method in EXPECTED_OPERATIONS:
+        if "{device_id}" not in path:
+            continue
+        device_id_parameter = next(
+            parameter
+            for parameter in schema["paths"][path][method]["parameters"]
+            if parameter["name"] == "device_id"
+        )
+        assert device_id_parameter["schema"]["maximum"] == (
+            POSTGRES_INTEGER_MAX
+        )
+        assert device_id_parameter["schema"]["exclusiveMinimum"] == 0
+
+    measurement_request = schema["components"]["schemas"][
+        "MeasurementCreateRequest"
+    ]
+    for field_name in PARTICLE_COUNTER_FIELDS:
+        field_schema = measurement_request["properties"][field_name]
+        integer_schema = next(
+            variant
+            for variant in field_schema["anyOf"]
+            if variant.get("type") == "integer"
+        )
+        assert integer_schema["minimum"] == 0
+        assert integer_schema["maximum"] == POSTGRES_INTEGER_MAX

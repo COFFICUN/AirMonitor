@@ -304,6 +304,35 @@ async def test_source_message_lookup_scopes_idempotency_to_device() -> None:
 
 
 @pytest.mark.anyio
+async def test_latest_measurement_timestamp_uses_one_bounded_aggregate() -> None:
+    latest_measured_at = datetime(
+        2026,
+        7,
+        23,
+        9,
+        45,
+        tzinfo=timezone.utc,
+    )
+    session = AsyncMock(spec=AsyncSession)
+    result = MagicMock()
+    result.scalar_one.return_value = latest_measured_at
+    session.execute.return_value = result
+    repository = RawMeasurementRepository(session)
+
+    actual = await repository.get_latest_measured_at(session_id=41)
+    sql = _compiled_sql(_executed_statement(session))
+
+    assert actual is latest_measured_at
+    assert sql.startswith("SELECT max(raw_measurements.measured_at)")
+    assert "WHERE raw_measurements.session_id = 41" in sql
+    assert "FROM raw_measurements" in sql
+    assert "FOR UPDATE" not in sql
+    result.scalar_one.assert_called_once_with()
+    result.scalars.assert_not_called()
+    _assert_no_transaction_calls(session)
+
+
+@pytest.mark.anyio
 async def test_raw_measurement_create_adds_all_inputs_and_flushes() -> None:
     session = AsyncMock(spec=AsyncSession)
     repository = RawMeasurementRepository(session)

@@ -196,6 +196,7 @@ def _measurement_service_harness() -> MeasurementServiceHarness:
     )
     measurement_repository = SimpleNamespace(
         get_by_source_message_id=AsyncMock(return_value=None),
+        get_latest_measured_at=AsyncMock(return_value=None),
         create=AsyncMock(return_value=None),
     )
     service.device_repository = device_repository
@@ -880,6 +881,96 @@ async def test_terminal_transition_rejects_invalid_end_timestamp(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "method_name",
+    ["complete_session", "cancel_session"],
+)
+async def test_terminal_transition_rejects_end_before_latest_measurement_without_state_changes(
+    method_name: str,
+) -> None:
+    harness = _measurement_service_harness()
+    _, runtime_state, measurement_session = (
+        _prepare_active_measurement_session(harness)
+    )
+    measurement_session.sample_count = 1
+    latest_measurement = _raw_measurement()
+    harness.measurement_repository.get_latest_measured_at.return_value = (
+        latest_measurement.measured_at
+    )
+    session_snapshot = (
+        measurement_session.status,
+        measurement_session.ended_at,
+        measurement_session.sample_count,
+    )
+    runtime_snapshot = (
+        runtime_state.measurement_enabled,
+        runtime_state.active_session_id,
+        runtime_state.measurement_started_at,
+        runtime_state.last_seen_at,
+    )
+    with pytest.raises(InvalidTimestampError):
+        await getattr(harness.service, method_name)(
+            device_id=DEVICE_ID,
+            ended_at=MEASURED_AT - timedelta(microseconds=1),
+        )
+
+    assert (
+        measurement_session.status,
+        measurement_session.ended_at,
+        measurement_session.sample_count,
+    ) == session_snapshot
+    assert (
+        runtime_state.measurement_enabled,
+        runtime_state.active_session_id,
+        runtime_state.measurement_started_at,
+        runtime_state.last_seen_at,
+    ) == runtime_snapshot
+    harness.measurement_repository.get_latest_measured_at.assert_awaited_once_with(
+        session_id=SESSION_ID
+    )
+    harness.measurement_repository.create.assert_not_awaited()
+    harness.session_repository.increment_sample_count.assert_not_awaited()
+    _assert_one_transaction(harness, InvalidTimestampError)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("method_name", "target_status"),
+    [
+        ("complete_session", "completed"),
+        ("cancel_session", "cancelled"),
+    ],
+)
+async def test_terminal_transition_accepts_end_equal_to_latest_measurement(
+    method_name: str,
+    target_status: str,
+) -> None:
+    harness = _measurement_service_harness()
+    _, runtime_state, measurement_session = (
+        _prepare_active_measurement_session(harness)
+    )
+    harness.measurement_repository.get_latest_measured_at.return_value = (
+        MEASURED_AT
+    )
+
+    result = await getattr(harness.service, method_name)(
+        device_id=DEVICE_ID,
+        ended_at=MEASURED_AT,
+    )
+
+    assert result is measurement_session
+    assert measurement_session.status == target_status
+    assert measurement_session.ended_at == MEASURED_AT
+    assert runtime_state.measurement_enabled is False
+    assert runtime_state.active_session_id is None
+    assert runtime_state.measurement_started_at is None
+    harness.measurement_repository.get_latest_measured_at.assert_awaited_once_with(
+        session_id=SESSION_ID
+    )
+    _assert_one_transaction(harness)
+
+
+@pytest.mark.anyio
 async def test_record_measurement_updates_counter_and_last_seen_atomically() -> None:
     harness = _measurement_service_harness()
     _, runtime_state, _ = _prepare_active_measurement_session(harness)
@@ -981,6 +1072,137 @@ async def test_record_measurement_updates_counter_and_last_seen_atomically() -> 
     _assert_utc(runtime_state.last_seen_at)
     assert runtime_state.last_seen_at >= received_at
     assert observed_at_exit == [runtime_state.last_seen_at]
+    _assert_one_transaction(harness)
+
+
+@pytest.mark.anyio
+async def test_record_measurement_rejects_timestamp_before_session_start_without_state_changes() -> None:
+    harness = _measurement_service_harness()
+    _, runtime_state, measurement_session = (
+        _prepare_active_measurement_session(harness)
+    )
+    measurement_session.sample_count = 3
+    runtime_state.last_seen_at = STARTED_AT - timedelta(minutes=10)
+    session_snapshot = (
+        measurement_session.status,
+        measurement_session.ended_at,
+        measurement_session.sample_count,
+    )
+    runtime_snapshot = (
+        runtime_state.measurement_enabled,
+        runtime_state.active_session_id,
+        runtime_state.measurement_started_at,
+        runtime_state.last_seen_at,
+    )
+
+    with pytest.raises(InvalidTimestampError):
+        await harness.service.record_measurement(
+            device_id=DEVICE_ID,
+            source_message_id="too-early",
+            measured_at=STARTED_AT - timedelta(microseconds=1),
+        )
+
+    assert (
+        measurement_session.status,
+        measurement_session.ended_at,
+        measurement_session.sample_count,
+    ) == session_snapshot
+    assert (
+        runtime_state.measurement_enabled,
+        runtime_state.active_session_id,
+        runtime_state.measurement_started_at,
+        runtime_state.last_seen_at,
+    ) == runtime_snapshot
+    harness.measurement_repository.get_by_source_message_id.assert_not_awaited()
+    harness.measurement_repository.create.assert_not_awaited()
+    harness.session_repository.increment_sample_count.assert_not_awaited()
+    _assert_one_transaction(harness, InvalidTimestampError)
+
+
+@pytest.mark.anyio
+async def test_record_measurement_accepts_timestamp_equal_to_session_start() -> None:
+    harness = _measurement_service_harness()
+    _prepare_active_measurement_session(harness)
+    created_measurement = _raw_measurement()
+    created_measurement.measured_at = STARTED_AT
+    harness.measurement_repository.create.return_value = created_measurement
+
+    result = await harness.service.record_measurement(
+        device_id=DEVICE_ID,
+        measured_at=STARTED_AT,
+    )
+
+    assert result is created_measurement
+    assert harness.measurement_repository.create.await_args is not None
+    assert (
+        harness.measurement_repository.create.await_args.kwargs["measured_at"]
+        == STARTED_AT
+    )
+    harness.session_repository.increment_sample_count.assert_awaited_once_with(
+        session_id=SESSION_ID
+    )
+    _assert_one_transaction(harness)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "operation",
+    ["record_measurement", "complete_session", "cancel_session"],
+)
+async def test_record_and_terminal_transitions_preserve_lock_order(
+    operation: str,
+) -> None:
+    harness = _measurement_service_harness()
+    device, runtime_state, measurement_session = (
+        _prepare_active_measurement_session(harness)
+    )
+    events: list[str] = []
+
+    def observe(name: str, value: object):
+        def side_effect(*args: Any, **kwargs: Any) -> object:
+            del args, kwargs
+            assert harness.transaction.active is True
+            events.append(name)
+            return value
+
+        return side_effect
+
+    harness.device_repository.get_by_id_for_update.side_effect = observe(
+        "device",
+        device,
+    )
+    harness.runtime_state_repository.get_for_update.side_effect = observe(
+        "runtime",
+        runtime_state,
+    )
+    harness.session_repository.get_by_id_for_update.side_effect = observe(
+        "session",
+        measurement_session,
+    )
+    harness.measurement_repository.get_latest_measured_at.side_effect = (
+        observe("latest-measurement", MEASURED_AT)
+    )
+    harness.measurement_repository.create.return_value = _raw_measurement()
+
+    if operation == "record_measurement":
+        await harness.service.record_measurement(
+            device_id=DEVICE_ID,
+            measured_at=MEASURED_AT,
+        )
+        assert events == ["device", "runtime", "session"]
+        harness.measurement_repository.get_latest_measured_at.assert_not_awaited()
+    else:
+        await getattr(harness.service, operation)(
+            device_id=DEVICE_ID,
+            ended_at=MEASURED_AT,
+        )
+        assert events == [
+            "device",
+            "runtime",
+            "session",
+            "latest-measurement",
+        ]
+
     _assert_one_transaction(harness)
 
 

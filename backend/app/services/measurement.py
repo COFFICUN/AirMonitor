@@ -194,6 +194,13 @@ class MeasurementService:
                     measured_at,
                     field_name="measured_at",
                 )
+                if normalized_measured_at < measurement_session.started_at:
+                    raise InvalidTimestampError(
+                        field_name="measured_at",
+                        reason=(
+                            "must not be earlier than the session start"
+                        ),
+                    )
                 if source_message_id is not None:
                     existing = (
                         await self.measurement_repository
@@ -295,6 +302,21 @@ class MeasurementService:
             raise InvalidTimestampError(
                 field_name="ended_at",
                 reason="must not be earlier than the session start",
+            )
+        latest_measured_at = (
+            await self.measurement_repository.get_latest_measured_at(
+                session_id=measurement_session.id
+            )
+        )
+        if (
+            latest_measured_at is not None
+            and normalized_ended_at < latest_measured_at
+        ):
+            raise InvalidTimestampError(
+                field_name="ended_at",
+                reason=(
+                    "must not be earlier than the latest measurement"
+                ),
             )
 
         measurement_session.status = target_status

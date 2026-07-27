@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import RawMeasurement
@@ -25,6 +25,17 @@ class RawMeasurementRepository:
         )
         result = await self._session.execute(statement)
         return result.scalar_one_or_none()
+
+    async def get_latest_measured_at(
+        self,
+        *,
+        session_id: int,
+    ) -> datetime | None:
+        statement = select(func.max(RawMeasurement.measured_at)).where(
+            RawMeasurement.session_id == session_id
+        )
+        result = await self._session.execute(statement)
+        return result.scalar_one()
 
     async def create(
         self,

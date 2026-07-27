@@ -22,11 +22,21 @@ from app.core.exceptions import (
     DeviceNotFoundError,
     DuplicateDeviceUIDError,
     DuplicateSourceMessageError,
+    InvalidTimestampError,
 )
 from app.main import create_application
 
 
 NOW = datetime(2026, 7, 23, 8, 30, tzinfo=UTC)
+POSTGRES_INTEGER_MAX = 2_147_483_647
+PARTICLE_COUNTER_FIELDS = (
+    "pc0_3",
+    "pc0_5",
+    "pc1_0",
+    "pc2_5",
+    "pc5_0",
+    "pc10",
+)
 
 
 @pytest.fixture
@@ -124,6 +134,168 @@ async def _request(
             content=content,
             headers=headers,
         )
+
+
+PATH_DEVICE_ID_CASES = (
+    (
+        "get-device",
+        "GET",
+        "/api/v1/devices/{device_id}",
+        None,
+        get_device_query_service,
+        "get_device",
+    ),
+    (
+        "set-device-status",
+        "PATCH",
+        "/api/v1/devices/{device_id}/status",
+        {"is_active": True},
+        get_device_service,
+        "activate_device",
+    ),
+    (
+        "start-session",
+        "POST",
+        "/api/v1/devices/{device_id}/sessions",
+        {"latitude": 51.1694, "longitude": 71.4491},
+        get_measurement_service,
+        "start_session",
+    ),
+    (
+        "get-active-session",
+        "GET",
+        "/api/v1/devices/{device_id}/sessions/active",
+        None,
+        get_active_session_query_service,
+        "get_active_session",
+    ),
+    (
+        "complete-session",
+        "POST",
+        "/api/v1/devices/{device_id}/sessions/active/complete",
+        {"ended_at": "2026-07-23T08:30:00Z"},
+        get_measurement_service,
+        "complete_session",
+    ),
+    (
+        "cancel-session",
+        "POST",
+        "/api/v1/devices/{device_id}/sessions/active/cancel",
+        {"ended_at": "2026-07-23T08:30:00Z"},
+        get_measurement_service,
+        "cancel_session",
+    ),
+    (
+        "record-measurement",
+        "POST",
+        "/api/v1/devices/{device_id}/measurements",
+        {"measured_at": "2026-07-23T08:30:00Z"},
+        get_measurement_service,
+        "record_measurement",
+    ),
+)
+
+
+def _path_case_return_value(service_method: str) -> SimpleNamespace:
+    if service_method in {"get_device", "activate_device"}:
+        return _device()
+    if service_method == "complete_session":
+        return _session(status="completed", ended_at=NOW)
+    if service_method == "cancel_session":
+        return _session(status="cancelled", ended_at=NOW)
+    if service_method == "record_measurement":
+        return _measurement()
+    return _session()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    (
+        "_case_name",
+        "method",
+        "path_template",
+        "payload",
+        "dependency",
+        "service_method",
+    ),
+    PATH_DEVICE_ID_CASES,
+    ids=[case[0] for case in PATH_DEVICE_ID_CASES],
+)
+async def test_path_device_id_accepts_postgres_integer_max(
+    application: FastAPI,
+    _case_name: str,
+    method: str,
+    path_template: str,
+    payload: dict[str, object] | None,
+    dependency: object,
+    service_method: str,
+) -> None:
+    operation = AsyncMock(
+        return_value=_path_case_return_value(service_method)
+    )
+    service = SimpleNamespace(**{service_method: operation})
+    application.dependency_overrides[dependency] = lambda: service
+
+    response = await _request(
+        application,
+        method,
+        path_template.format(device_id=POSTGRES_INTEGER_MAX),
+        json=payload,
+    )
+
+    assert response.status_code in {200, 201}
+    operation.assert_awaited_once()
+    assert operation.await_args is not None
+    assert (
+        operation.await_args.kwargs["device_id"]
+        == POSTGRES_INTEGER_MAX
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    (
+        "_case_name",
+        "method",
+        "path_template",
+        "payload",
+        "dependency",
+        "service_method",
+    ),
+    PATH_DEVICE_ID_CASES,
+    ids=[case[0] for case in PATH_DEVICE_ID_CASES],
+)
+async def test_path_device_id_above_postgres_integer_max_uses_safe_422_before_service(
+    application: FastAPI,
+    _case_name: str,
+    method: str,
+    path_template: str,
+    payload: dict[str, object] | None,
+    dependency: object,
+    service_method: str,
+) -> None:
+    operation = AsyncMock(
+        return_value=_path_case_return_value(service_method)
+    )
+    service = SimpleNamespace(**{service_method: operation})
+    application.dependency_overrides[dependency] = lambda: service
+
+    response = await _request(
+        application,
+        method,
+        path_template.format(device_id=POSTGRES_INTEGER_MAX + 1),
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "error": {
+            "code": "request_validation_error",
+            "message": "Request validation failed.",
+            "details": None,
+        }
+    }
+    operation.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -493,6 +665,131 @@ async def test_record_measurement_calls_service_with_validated_payload(
         is_valid=True,
         validation_note=None,
     )
+
+
+@pytest.mark.anyio
+async def test_particle_counters_accept_postgres_integer_max(
+    application: FastAPI,
+) -> None:
+    operation = AsyncMock(return_value=_measurement())
+    service = SimpleNamespace(record_measurement=operation)
+    application.dependency_overrides[get_measurement_service] = (
+        lambda: service
+    )
+    payload = {
+        "measured_at": "2026-07-23T08:30:00Z",
+        **{
+            field_name: POSTGRES_INTEGER_MAX
+            for field_name in PARTICLE_COUNTER_FIELDS
+        },
+    }
+
+    response = await _request(
+        application,
+        "POST",
+        "/api/v1/devices/7/measurements",
+        json=payload,
+    )
+
+    assert response.status_code == 201
+    operation.assert_awaited_once()
+    assert operation.await_args is not None
+    for field_name in PARTICLE_COUNTER_FIELDS:
+        assert (
+            operation.await_args.kwargs[field_name]
+            == POSTGRES_INTEGER_MAX
+        )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("field_name", PARTICLE_COUNTER_FIELDS)
+async def test_particle_counter_above_postgres_integer_max_uses_safe_422_before_service(
+    application: FastAPI,
+    field_name: str,
+) -> None:
+    operation = AsyncMock(return_value=_measurement())
+    service = SimpleNamespace(record_measurement=operation)
+    application.dependency_overrides[get_measurement_service] = (
+        lambda: service
+    )
+
+    response = await _request(
+        application,
+        "POST",
+        "/api/v1/devices/7/measurements",
+        json={
+            "measured_at": "2026-07-23T08:30:00Z",
+            field_name: POSTGRES_INTEGER_MAX + 1,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "error": {
+            "code": "request_validation_error",
+            "message": "Request validation failed.",
+            "details": None,
+        }
+    }
+    operation.assert_not_awaited()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("path", "service_method", "payload"),
+    [
+        (
+            "/api/v1/devices/7/measurements",
+            "record_measurement",
+            {"measured_at": "2026-07-23T08:30:00Z"},
+        ),
+        (
+            "/api/v1/devices/7/sessions/active/complete",
+            "complete_session",
+            {"ended_at": "2026-07-23T08:30:00Z"},
+        ),
+        (
+            "/api/v1/devices/7/sessions/active/cancel",
+            "cancel_session",
+            {"ended_at": "2026-07-23T08:30:00Z"},
+        ),
+    ],
+)
+async def test_chronology_conflicts_use_safe_409(
+    application: FastAPI,
+    path: str,
+    service_method: str,
+    payload: dict[str, object],
+) -> None:
+    operation = AsyncMock(
+        side_effect=InvalidTimestampError(
+            "timestamp",
+            "SECRET chronology detail",
+        )
+    )
+    service = SimpleNamespace(**{service_method: operation})
+    application.dependency_overrides[get_measurement_service] = (
+        lambda: service
+    )
+
+    response = await _request(
+        application,
+        "POST",
+        path,
+        json=payload,
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": {
+            "code": "invalid_timestamp",
+            "message": (
+                "The supplied timestamp conflicts with session state."
+            ),
+            "details": None,
+        }
+    }
+    assert "SECRET" not in response.text
 
 
 @pytest.mark.anyio
