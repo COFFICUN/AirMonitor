@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
+import pytest
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
 
@@ -23,6 +26,25 @@ TARGET_AFFECTING_QUERY_KEYS = frozenset(
 
 class PersistenceTargetError(ValueError):
     """Raised when an integration target is not provably disposable."""
+
+
+async def run_persistence_preflight_safely(
+    preflight: Callable[[], Awaitable[None]],
+) -> None:
+    """Fail without retaining secret-bearing connection exceptions."""
+    try:
+        await preflight()
+    except Exception:
+        pass
+    else:
+        return
+
+    failure = pytest.fail.Exception(
+        "Persistence integration database preflight failed. "
+        "Verify local PostgreSQL availability.",
+        pytrace=False,
+    )
+    raise failure from None
 
 
 def validate_persistence_database_url(value: str) -> URL:
@@ -61,5 +83,6 @@ def validate_persistence_database_url(value: str) -> URL:
 
 __all__ = [
     "PersistenceTargetError",
+    "run_persistence_preflight_safely",
     "validate_persistence_database_url",
 ]

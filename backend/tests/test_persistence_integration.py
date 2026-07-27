@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import (
 
 from tests.persistence_guard import (
     PersistenceTargetError,
+    run_persistence_preflight_safely,
     validate_persistence_database_url,
 )
 
@@ -31,10 +32,10 @@ if os.environ.get("AIRMONITOR_RUN_PERSISTENCE_INTEGRATION") != "1":
         allow_module_level=True,
     )
 
-_DATABASE_URL_TEXT = os.environ.get("AIRMONITOR_DATABASE_URL")
+_DATABASE_URL_TEXT = os.environ.get("AIRMONITOR_TEST_DATABASE_URL")
 if _DATABASE_URL_TEXT is None:
     pytest.fail(
-        "persistence integration tests require an explicit database URL",
+        "Persistence integration tests require the dedicated database URL.",
         pytrace=False,
     )
 
@@ -148,7 +149,9 @@ async def session_factory(
         autoflush=False,
     )
     try:
-        await _preflight_disposable_database(engine)
+        await run_persistence_preflight_safely(
+            lambda: _preflight_disposable_database(engine)
+        )
         yield factory
     finally:
         await engine.dispose()
