@@ -1,3 +1,5 @@
+Set-Location "C:\Users\nazar\Desktop\AirMonitor"
+
 @'
 # AirMonitor Agent Instructions
 
@@ -5,8 +7,8 @@
 
 AirMonitor v1 is the stable legacy implementation.
 
-The following legacy assets are read-only reference material and must not be
-modified:
+The following legacy assets are read-only reference material and must never be
+modified unless the user explicitly requests it:
 
 - root app.py;
 - root sensor_data.db;
@@ -20,177 +22,297 @@ PostgreSQL, Pydantic, and pytest.
 
 ## Current active task
 
-Sprint 8 Final Verification.
+Sprint 8 Phase C4A — Production Configuration Contract.
 
-This is a read-only audit and verification phase.
+Implement only:
 
-Do not modify production code, tests, documentation, configuration, migrations,
-requirements, Agent Skills, legacy files, or Git state.
+- complete AUDIT-006 by replacing literal database-URL comparison with
+  structural production-target validation;
+- close AUDIT-011 by removing the inert api_prefix setting while preserving
+  the fixed /api/v1 route contract.
 
-Read completely:
+Read completely before changing files:
 
 docs/reviews/sprint-8-full-codebase-audit.md
+docs/reviews/sprint-8-final-verification.md
 
-Review all changes made after the original audit and determine the final status
-of every finding.
+Preserve all completed Phase C1, C2A, C2B, and C3 behavior.
 
-## Findings to verify
+## Approved production database policy
 
-Verify the final status of:
+Production must continue rejecting:
 
-- AUDIT-001: application settings and database composition;
-- AUDIT-002: non-finite telemetry;
-- AUDIT-003: session and measurement chronology;
-- AUDIT-004: PostgreSQL INTEGER API boundaries;
-- AUDIT-005: safe API error contract;
-- AUDIT-006: production configuration hardening;
-- AUDIT-007: engine disposal and lifespan cleanup;
-- AUDIT-008: persistence test database variable;
-- AUDIT-009: persistence preflight sanitization;
-- AUDIT-010: integration database cleanup;
-- AUDIT-011: inert API prefix configuration;
-- AUDIT-012: dependency override cleanup test;
-- AUDIT-013: health-test environment isolation;
-- AUDIT-014: README accuracy.
+- debug=true;
+- database_echo=true;
+- the built-in development database target and its canonical equivalents.
 
-AUDIT-010 was explicitly deferred. Do not implement it.
+The development target must be detected structurally rather than by raw string
+equality.
 
-Do not silently treat AUDIT-007, AUDIT-011, or AUDIT-014 as fixed. Inspect and
-report their actual status with evidence.
+Use an existing trusted URL parser such as SQLAlchemy URL parsing. Do not
+implement database URL parsing using split(), regular expressions, or manual
+credential extraction.
 
-## Required classification
+The structural comparison must account for:
 
-Classify each finding as exactly one of:
+- driver name normalization;
+- decoded username;
+- decoded password;
+- normalized host;
+- normalized port;
+- decoded database name;
+- PostgreSQL default port 5432 when the port is omitted;
+- host case differences;
+- a trailing dot in localhost;
+- localhost, IPv4 loopback, and IPv6 loopback equivalence;
+- percent-encoded equivalents;
+- harmless query options that must not make the built-in target acceptable.
 
-- FIXED;
-- PARTIALLY FIXED;
-- OPEN;
-- DEFERRED;
-- NO LONGER APPLICABLE.
+Do not resolve hostnames and do not perform DNS or network access.
 
-For every finding provide:
+Production URLs containing query keys that can override connection identity
+must be rejected as ambiguous. At minimum cover:
 
-- current classification;
-- relevant files and symbols;
-- supporting test coverage;
-- remaining risk;
-- recommended next action.
+- host;
+- port;
+- database;
+- dbname;
+- user;
+- username;
+- password;
+- service;
+- servicefile.
 
-## Required verification
+Query-key comparison must be case-insensitive.
+
+The implementation must not print, log, format, interpolate, serialize, or
+otherwise expose:
+
+- database URLs;
+- usernames;
+- passwords;
+- hosts;
+- ports;
+- database names;
+- query values;
+- parsed URL representations.
+
+Validation failures must use short fixed messages with no input values.
+
+Existing Settings input hiding and SQLAlchemy hide_parameters=True behavior
+must remain intact.
+
+Development and test configurations must retain their current behavior.
+
+## Approved API-prefix policy
+
+The public API contract remains fixed at:
+
+/api/v1
+
+Remove the inert api_prefix field rather than wiring it into router
+composition.
+
+Remove:
+
+- Settings.api_prefix;
+- its default value;
+- its AIRMONITOR_API_PREFIX example entry;
+- tests or assertions that represent it as a supported configuration option.
+
+Do not:
+
+- make routes environment-dependent;
+- introduce a replacement prefix setting;
+- change router prefixes;
+- change paths;
+- change operation IDs;
+- change request or response schemas;
+- change successful status codes.
+
+A stale AIRMONITOR_API_PREFIX process variable must not change routes or
+OpenAPI. It may be ignored as an unsupported environment variable according
+to the existing settings-source behavior.
+
+## Required workflow
+
+Start with using-agent-skills and select the minimum sufficient installed
+skills.
+
+Use strict test-driven development:
+
+1. inspect current settings defaults, validation, environment-source behavior,
+   router composition, .env.example, and relevant tests;
+2. add focused failing regression tests;
+3. demonstrate that the failures correspond to AUDIT-006 and AUDIT-011;
+4. implement the smallest coherent fix;
+5. rerun focused tests;
+6. run the complete offline backend suite;
+7. perform a bounded adversarial review;
+8. stop for manual external review.
+
+Do not implement before RED failures are demonstrated.
+
+## Allowed production scope
+
+Modify only the minimum necessary subset of:
+
+- backend/app/core/config.py
+- backend/.env.example
+
+The router should not require a production change because /api/v1 already is
+the correct fixed contract. Stop and report before changing router code unless
+current source evidence proves it is necessary.
+
+## Allowed test scope
+
+Modify only the minimum necessary subset of:
+
+- backend/tests/test_config.py
+- backend/tests/test_api_openapi.py
+- backend/tests/test_application_composition.py
+- backend/tests/test_api_routes.py
+- one focused new configuration test module only when it materially improves
+  clarity
+
+Do not modify live integration guards or database cleanup behavior.
+
+## AUDIT-006 acceptance criteria
+
+Prove all of the following:
+
+1. Production still rejects debug=true.
+2. Production still rejects database_echo=true.
+3. Production rejects the exact built-in development database URL.
+4. Production rejects the equivalent URL when port 5432 is omitted.
+5. Production rejects equivalent host case variants.
+6. Production rejects localhost with a trailing dot.
+7. Production rejects equivalent IPv4 loopback representation.
+8. Production rejects equivalent IPv6 loopback representation.
+9. Production rejects equivalent percent-encoded components.
+10. Harmless query options do not bypass development-target rejection.
+11. Target-identity override query keys are rejected in production.
+12. Query-key matching is case-insensitive.
+13. A genuinely distinct explicit PostgreSQL+asyncpg production target is
+    accepted.
+14. Existing driver validation remains intact.
+15. Development and test continue accepting their current configurations.
+16. Validation errors do not contain the candidate URL or any component,
+    credential, query value, or sentinel.
+17. Captured logs and stdout/stderr do not contain sensitive target values.
+18. Validation performs no DNS lookup or network call.
+19. Engine construction remains lazy and performs no connection.
+20. hide_parameters=True remains enabled.
+
+## AUDIT-011 acceptance criteria
+
+Prove all of the following:
+
+1. Settings no longer contains api_prefix.
+2. The built-in settings defaults no longer contain api_prefix.
+3. backend/.env.example no longer advertises AIRMONITOR_API_PREFIX.
+4. Setting a synthetic AIRMONITOR_API_PREFIX does not change routes.
+5. The public path remains /api/v1.
+6. OpenAPI still contains nine total operations.
+7. OpenAPI still contains eight /api/v1 operations and one /health operation.
+8. Operation IDs remain unique and unchanged.
+9. Request schemas, success response schemas, and successful status codes
+   remain unchanged.
+10. No replacement dynamic-prefix mechanism is introduced.
+
+## Explicitly forbidden
+
+Do not:
+
+- implement AUDIT-010;
+- modify integration database setup or cleanup;
+- connect to PostgreSQL;
+- inspect, create, migrate, clean, truncate, or drop a database;
+- read or print real database environment-variable values;
+- implement Telemetry Read API;
+- change routes or operation IDs;
+- change domain behavior or error codes;
+- change chronology or integer-boundary behavior;
+- change ORM models, constraints, indexes, relationships, or database types;
+- create or modify Alembic revisions;
+- modify README during this phase;
+- modify the audit or final-verification reports;
+- add authentication, authorization, CORS, rate limiting, logging, Docker, or
+  CI;
+- modify requirements or install dependencies;
+- modify Agent Skills;
+- modify legacy files, firmware, certificates, keys, secrets, or .env files;
+- perform Git write operations.
+
+Read-only Git commands are allowed.
+
+## Test environment
 
 Use only:
 
 C:\Users\nazar\Desktop\AirMonitor\backend\.venv\Scripts\python.exe
+
+Do not modify this environment.
 
 All pytest commands must use:
 
 - -B;
 - -p no:cacheprovider;
 - no live integration opt-ins;
-- no PostgreSQL connection.
+- no PostgreSQL connection;
+- synthetic configuration values created only inside tests.
 
-At minimum perform:
+Do not read or print existing database environment-variable values.
 
-1. read-only Git status and history inspection;
-2. comparison between the original audited baseline and current HEAD;
-3. complete offline backend suite;
-4. pip check;
-5. OpenAPI generation and inventory validation;
-6. unique operation ID validation;
-7. import, application factory, lifespan, and engine no-connection guards;
-8. engine creation and disposal review;
-9. settings and environment isolation review;
-10. ORM and Alembic head consistency review;
-11. migration and ORM schema parity review using offline/static methods only;
-12. API error-envelope review;
-13. chronology and integer-boundary review;
-14. persistence guard and test-fixture review;
-15. README and configuration-field accuracy review;
-16. in-memory source compilation;
-17. sensitive/generated-path inspection;
-18. git diff --check;
-19. final adversarial review.
+## Required verification
 
-Expected current offline baseline:
+At minimum run:
+
+1. focused structural production-target tests;
+2. focused sensitive-validation-output tests;
+3. focused api_prefix-removal tests;
+4. existing config and database-engine tests;
+5. affected composition, route, and OpenAPI tests;
+6. the complete offline backend suite;
+7. pip check;
+8. guarded OpenAPI generation;
+9. import, factory, lifespan, and engine no-connection guards;
+10. a guard proving no DNS or socket operation occurred during validation;
+11. in-memory source compilation without repository bytecode;
+12. git diff --check;
+13. sensitive/generated-path checks;
+14. final read-only diff and status inspection.
+
+Current pre-change offline baseline:
 
 - 356 passed;
 - 2 skipped.
 
-Expected public API inventory:
+Expected public API inventory remains:
 
+- OpenAPI 3.1.0;
 - nine total operations;
-- eight under /api/v1;
-- one /health;
+- eight operations under /api/v1;
+- one /health operation;
 - unique operation IDs.
 
-## Database restrictions
+## Definition of done
 
-Do not:
+Phase C4A is complete only when:
 
-- connect to PostgreSQL;
-- inspect a live database;
-- create or drop a database;
-- run migrations against a database;
-- read or print database environment variable values;
-- activate integration suites;
-- execute preflight SQL;
-- modify database contents.
-
-Use static SQLAlchemy metadata, Alembic source files, mocks, and existing
-offline tests only.
-
-## Git restrictions
-
-Do not:
-
-- stage files;
-- commit;
-- push;
-- create branches;
-- create tags;
-- create pull requests;
-- reset, checkout, restore, clean, stash, merge, or rebase;
-- modify Git refs or worktree registration.
-
-Read-only Git commands are allowed.
-
-## Scope restrictions
-
-Do not implement fixes during this review.
-
-Do not modify:
-
-- backend/app;
-- backend/tests;
-- Alembic files;
-- README;
-- AGENTS.md;
-- requirements;
-- legacy files;
-- environment files;
-- Agent Skills.
-
-When a remaining issue is found, report it and propose a bounded next phase.
-
-## Required final report
-
-The final report must include:
-
-1. repository root, worktree, detached HEAD, and base branch;
-2. exact current Git status;
-3. exact verification commands and results;
-4. full finding matrix for AUDIT-001 through AUDIT-014;
-5. evidence for every classification;
-6. OpenAPI inventory;
-7. migration and ORM consistency result;
-8. no-connection evidence;
-9. security and compatibility assessment;
-10. remaining technical debt;
-11. recommended next phase;
-12. whether development of Telemetry Read API should begin now;
-13. final diff and Git status.
-
-Stop for manual external review.
-
-Do not make any file or Git change.
+- RED tests reproduce the canonical-equivalent production-target bypass;
+- RED tests reproduce the inert api_prefix configuration;
+- production-target comparison is structural and sanitized;
+- canonical variants of the built-in development target are rejected;
+- ambiguous target-override query keys are rejected;
+- api_prefix is removed from Settings and .env.example;
+- the fixed /api/v1 API contract is preserved;
+- the complete offline suite passes;
+- no network or PostgreSQL connection occurs;
+- no migration, ORM, integration-cleanup, dependency, README, legacy, or
+  unrelated change occurs;
+- Codex performs no Git write operation;
+- the final response lists RED failures, changed files, exact commands and
+  results, OpenAPI compatibility, no-network evidence, remaining limitations,
+  and final Git status.
 '@ | Set-Content -Path ".\AGENTS.md" -Encoding UTF8
