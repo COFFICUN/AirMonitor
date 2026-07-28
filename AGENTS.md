@@ -20,238 +20,408 @@ PostgreSQL, Pydantic, and pytest.
 
 ## Current active task
 
-Sprint 8 Phase C4B1 — Offline Integration Database Isolation.
+Sprint 8 Phase C4C — Documentation and Telemetry Read API Contract.
 
-Implement only AUDIT-010:
+This is a documentation-only phase.
 
-- make persistence integration repeatable against one approved disposable
-  PostgreSQL database;
-- make API integration repeatable against one approved disposable PostgreSQL
-  database;
-- clean application tables before and after each integration suite;
-- restore an empty database after normal completion and test-body failure;
-- reset PostgreSQL identity sequences.
+Implement only:
 
-This first pass is strictly offline.
-
-Do not connect to PostgreSQL during this Codex session.
+- close AUDIT-014 by rewriting README.md against the verified AirMonitor v2
+  implementation;
+- document the completed C4B live PostgreSQL verification;
+- create a source-grounded specification for the future Telemetry Read API.
 
 Read completely:
 
-docs/reviews/sprint-8-full-codebase-audit.md
-docs/reviews/sprint-8-final-verification.md
+- docs/reviews/sprint-8-full-codebase-audit.md
+- docs/reviews/sprint-8-final-verification.md
+- current README.md
+- backend application, configuration, migration, requirements, tests, and
+  OpenAPI sources necessary to verify documentation claims.
 
-Preserve all completed Phase C1, C2A, C2B, C3, and C4A behavior.
+Preserve all completed Phase C1, C2A, C2B, C3, C4A, and C4B behavior.
 
-## Approved isolation policy
+## Documentation scope
 
-Each live integration suite must follow this order:
+Modify only:
 
-1. require its explicit live-test opt-in;
-2. require its dedicated test database URL;
-3. validate the target with the existing disposable-database guard;
-4. construct its test engine;
-5. run its existing schema and Alembic preflight;
-6. reset all AirMonitor application tables;
-7. verify the application tables are empty;
-8. yield control to the integration suite;
-9. reset all AirMonitor application tables in a finally path;
-10. dispose the engine in an outer finally path.
+- README.md
+- docs/reviews/sprint-8-c4b-live-verification.md
+- docs/specs/telemetry-read-api.md
 
-No destructive database action may occur before target validation and schema
-preflight succeed.
+The docs/reviews and docs/specs directories may be created only if needed.
 
-## Approved reset operation
+Do not modify:
 
-Use one test-only PostgreSQL TRUNCATE operation containing every table from
-AirMonitor ORM metadata.
+- AGENTS.md after the scope commit;
+- backend application code;
+- backend tests;
+- ORM models;
+- Alembic revisions;
+- requirements;
+- environment templates;
+- legacy files;
+- Agent Skills.
+
+## README requirements
+
+Rewrite README.md so it accurately documents the current repository.
+
+It must clearly distinguish:
+
+- AirMonitor v1 legacy assets at the repository root;
+- AirMonitor v2 under backend/;
+- main as the stable legacy line;
+- develop and feature branches as the v2 development workflow.
+
+Document the verified v2 architecture:
+
+- FastAPI;
+- PostgreSQL;
+- SQLAlchemy async engine and sessions;
+- Alembic;
+- Pydantic settings;
+- pytest;
+- application-owned database engine/session lifecycle.
+
+Document the current hardware context without inventing new behavior:
+
+- M5Stack/ESP32;
+- PMSA003 particulate sensor;
+- SHT30 temperature/humidity sensor;
+- mobile air-quality and microclimate monitoring.
+
+Document current backend capabilities:
+
+- health;
+- device creation and retrieval;
+- device status update;
+- session start, active-session retrieval, complete and cancel;
+- raw measurement ingestion;
+- safe error envelopes;
+- chronology enforcement;
+- finite telemetry validation;
+- PostgreSQL INTEGER boundaries.
+
+List the exact current nine OpenAPI operations by inspecting the source or
+generated schema.
+
+Do not describe future read endpoints as already implemented.
+
+Document setup using the actual repository files:
+
+- supported Python version;
+- virtual environment creation;
+- requirements installation;
+- PostgreSQL database preparation;
+- environment configuration;
+- Alembic upgrade;
+- Uvicorn start command;
+- health verification.
+
+Do not include real credentials, passwords, local user-specific paths, or
+database URLs.
+
+Document supported settings exactly as they exist after C4A.
+
+Do not advertise api_prefix.
+
+Document test commands:
+
+- focused and complete offline pytest;
+- pip check;
+- integration tests as explicit opt-in only.
+
+Document integration-test safety:
+
+- dedicated disposable URLs;
+- approved local hosts;
+- required disposable database prefixes;
+- persistence explicit opt-in;
+- API integration activation;
+- initial and final TRUNCATE;
+- RESTART IDENTITY;
+- no CASCADE;
+- never use the protected or development database.
+
+Document deployment limitations:
+
+- current API has no authentication or authorization;
+- public exposure is not approved;
+- private or trusted-network use only;
+- Docker, CI, Redis, aggregation, forecast, AQI read APIs, and telemetry
+  history endpoints must not be presented as implemented unless current source
+  proves otherwise.
+
+Document Git and secret safety:
+
+- do not commit .env;
+- do not commit certificates, keys, database dumps, or passwords;
+- use .env.example as a template only.
+
+## C4B live-verification report
+
+Create:
+
+docs/reviews/sprint-8-c4b-live-verification.md
+
+Record only verified facts.
+
+Include:
+
+- date of verification;
+- PostgreSQL 18.4;
+- source branch;
+- relevant C4B commits identified through read-only Git history;
+- one temporary non-superuser role;
+- two separate disposable databases;
+- the approved database-name prefixes;
+- Alembic revision a4f9c2e7d1b6;
+- persistence integration run twice with 13 passing tests each time;
+- API integration initially exposing an outdated measurement timestamp in the
+  test;
+- the chronology test correction;
+- final API integration run twice with 6 passing tests each time;
+- cleanup verification after every run;
+- empty application tables after every run;
+- identity restart verification;
+- final removal of both databases and temporary role;
+- final offline suite result from the C4B implementation baseline;
+- no remaining live database objects.
+
+Do not include:
+
+- generated role name;
+- generated database names beyond approved prefixes;
+- passwords;
+- database URLs;
+- administrator credentials;
+- local secrets.
+
+Explain that the six API tests include real PostgreSQL serialization coverage
+for:
+
+- terminal transition first, then record;
+- record first, then terminal transition;
+- complete;
+- cancel.
+
+## Telemetry Read API contract
+
+Create:
+
+docs/specs/telemetry-read-api.md
+
+This is a design specification, not an implementation report.
+
+Approved MVP endpoints:
+
+- GET /api/v1/devices/{device_id}/sessions
+- GET /api/v1/devices/{device_id}/measurements
+
+Do not add other endpoints to the MVP.
+
+### Sessions endpoint
+
+Required stable ordering:
+
+started_at DESC, id DESC
+
+Supported filters:
+
+- status;
+- started_from;
+- started_to;
+- limit;
+- cursor.
+
+### Measurements endpoint
+
+Required stable ordering:
+
+measured_at DESC, id DESC
+
+Supported filters:
+
+- session_id;
+- measured_from;
+- measured_to;
+- limit;
+- cursor.
+
+### Pagination contract
+
+Use keyset pagination.
+
+Do not use offset pagination.
 
 Required behavior:
 
-- derive the table inventory from the existing SQLAlchemy Base metadata;
-- include every AirMonitor application table;
-- execute one TRUNCATE statement;
-- use RESTART IDENTITY;
-- do not use CASCADE;
-- execute inside an explicit transaction;
-- await transaction completion;
-- do not maintain a separate manually duplicated table-name list.
+- default limit: 100;
+- minimum limit: 1;
+- maximum limit: 500;
+- cursor is exclusive;
+- cursor is URL-safe;
+- cursor is opaque to clients;
+- cursor is versioned;
+- cursor includes the last ordering tuple;
+- cursor binds to normalized filters through a fingerprint or equivalent
+  deterministic validation;
+- reusing a cursor with different filters returns safe 422;
+- malformed, unsupported-version, or semantically invalid cursor returns safe
+  422;
+- cursor content must not contain secrets;
+- valid pagination must not skip or duplicate rows under stable stored data.
 
-The currently expected table inventory is:
+Use these ordering tuples:
 
-- devices;
-- device_runtime_state;
-- measurement_sessions;
-- raw_measurements.
+- sessions: (started_at, id);
+- measurements: (measured_at, id).
 
-The implementation must fail closed if metadata has no tables or if reset
-execution fails.
+### Time filter contract
 
-Do not use:
+Use half-open ranges:
 
-- Base.metadata.drop_all;
-- Base.metadata.create_all;
-- Alembic upgrade or downgrade;
-- database creation or deletion;
-- schema deletion;
-- CASCADE;
-- row-by-row DELETE;
-- production application settings.
+[from, to)
 
-## Error-sanitization policy
+Required validation:
 
-Use fixed messages only.
+- from may equal to only if the product decision explicitly chooses an empty
+  result; otherwise document and reject it consistently;
+- from greater than to is invalid;
+- all timestamps must be timezone-aware;
+- normalize timestamps consistently with existing application behavior.
 
-Persistence suite:
+Choose and document one exact equality policy after inspecting existing
+validation conventions. Do not leave it ambiguous.
 
-- `Persistence integration database preflight failed.`
-- `Persistence integration database reset failed.`
+### Response contract
 
-API suite:
+Both endpoints return:
 
-- `API integration database preflight failed.`
-- `API integration database reset failed.`
+{
+  "items": [...],
+  "next_cursor": null | string
+}
 
-A raw driver, SQLAlchemy, SQL, URL, host, port, username, password, database
-name, filesystem path, or sentinel value must not appear in the public failure.
+Use exact current ORM/schema field names by inspecting source.
 
-Sanitized failures must not retain the original exception through __cause__ or
-__context__.
+Do not invent fields.
 
-Engine disposal must still run when preflight, initial reset, suite execution,
-or final reset raises.
+Document which fields appear in:
 
-## Shared test-only implementation
+- session list items;
+- raw measurement list items.
 
-A small shared module under backend/tests is allowed and preferred when both
-integration suites use the exact same reset logic.
+Do not expose internal SQLAlchemy state.
 
-Production application modules under backend/app must not depend on the test
-helper.
+### Error contract
 
-The shared helper may accept:
+Document:
 
-- an AsyncEngine or AsyncConnection;
-- SQLAlchemy MetaData;
-- a fixed suite-specific safe error message.
+- 200 success;
+- 404 device not found;
+- 422 invalid path, filters, limit, timestamps, or cursor;
+- safe generic 500.
 
-It must not:
+Use existing ErrorResponse terminology.
 
-- read environment variables;
-- create its own application settings;
-- decide whether a target is safe;
-- connect before the calling suite completes target validation;
-- log or render a database URL.
+Do not invent new domain error codes without explicit justification.
+
+### Integer boundaries
+
+All identifiers mapped to PostgreSQL INTEGER must retain:
+
+- greater than zero;
+- maximum 2,147,483,647.
+
+### Authorization and deployment policy
+
+The current v2 API does not implement authentication or authorization.
+
+The MVP read endpoints inherit the current trusted-network model.
+
+Document explicitly:
+
+- no authentication is added by the read feature;
+- public internet exposure is not approved;
+- a dedicated authentication/authorization and rate-limiting phase is required
+  before public deployment;
+- cursor data is not an authorization mechanism.
+
+### Data and performance policy
+
+The read implementation must be read-only.
+
+It must not mutate:
+
+- runtime state;
+- sessions;
+- measurements;
+- sample_count;
+- last_seen_at.
+
+Before implementation, inspect existing indexes against the proposed filter and
+ordering patterns.
+
+Do not claim existing indexes are sufficient unless source evidence proves it.
+
+The future implementation phase must either:
+
+- demonstrate suitable existing index coverage; or
+- add a reviewed Alembic migration.
+
+Do not introduce aggregation, AQI, forecast, NowCast, map clustering, CSV
+export, or retention behavior into this MVP.
+
+### Compatibility
+
+Proposed operation IDs:
+
+- list_device_sessions;
+- list_device_measurements.
+
+The implementation would increase the OpenAPI inventory from nine operations
+to eleven.
+
+Existing paths, operation IDs, requests, responses, and successful status
+codes must remain unchanged.
 
 ## Required workflow
 
-Start with using-agent-skills and select the minimum sufficient installed
-skills.
+Use source-driven documentation.
 
-Use strict test-driven development:
+Before editing:
 
-1. inspect both integration fixtures and existing guards;
-2. design focused offline regression tests;
-3. demonstrate RED failures;
-4. implement the smallest shared test-only reset mechanism;
-5. integrate it into both suite fixtures;
-6. run focused offline tests;
-7. run the complete offline suite;
-8. perform a bounded adversarial review;
-9. stop for manual external review.
+1. report repository root, worktree, detached HEAD, and base branch;
+2. report exact Git status;
+3. list loaded instructions;
+4. inspect README and all source files needed to support documentation;
+5. generate the current OpenAPI schema offline;
+6. inspect settings, requirements, Alembic revision, tests, and integration
+   guards;
+7. identify every factual statement that must be corrected.
 
-Do not implement before RED failures are demonstrated.
+Do not copy stale statements from the current README.
 
-## Allowed files
+Do not claim planned features are implemented.
 
-Modify only the minimum necessary subset of:
+After editing:
 
-- backend/tests/persistence_guard.py
-- backend/tests/api_integration_guard.py
-- backend/tests/test_persistence_integration.py
-- backend/tests/test_api_integration.py
-- backend/tests/test_persistence_guard.py
-- backend/tests/test_api_integration_guard.py
-- one new shared test-only helper module under backend/tests
-- one new focused offline test module for database reset behavior
-
-No production application file change is expected.
-
-Stop and report instead of modifying backend/app.
-
-## Acceptance criteria
-
-Prove offline through mocks, fake engines, fake connections, fixture generators,
-and fail-fast network guards:
-
-1. Both suites use the same shared reset implementation.
-2. Target validation occurs before engine construction or reset execution.
-3. Schema/Alembic preflight occurs before the first reset.
-4. Initial reset occurs before the suite body.
-5. Final reset occurs after normal suite completion.
-6. Final reset occurs after an exception from the suite body.
-7. Engine disposal occurs after normal completion.
-8. Engine disposal occurs after preflight failure.
-9. Engine disposal occurs after initial reset failure.
-10. Engine disposal occurs after suite-body failure.
-11. Engine disposal occurs after final reset failure.
-12. The reset statement contains every table in Base metadata.
-13. The reset is one TRUNCATE statement.
-14. The reset uses RESTART IDENTITY.
-15. The reset does not contain CASCADE.
-16. No drop_all, create_all, Alembic mutation, database creation, or database
-    deletion occurs.
-17. Reset failure messages are fixed and sanitized.
-18. Reset failures have no retained __cause__.
-19. Reset failures have no retained __context__.
-20. Raw SQLAlchemy/driver sentinel values do not appear in captured output.
-21. A stale non-empty database no longer causes the suite to fail before reset.
-22. A post-reset emptiness check still fails closed if tables are not empty.
-23. Existing protected-target, local-host, driver, query, prefix, and opt-in
-    guards remain unchanged.
-24. No live integration suite is activated during offline verification.
-25. No PostgreSQL, DNS, socket, asyncpg, engine connection, or schema creation
-    occurs during this phase.
-26. Public API and OpenAPI remain unchanged.
-27. ORM models and Alembic files remain unchanged.
-
-## Explicitly deferred live acceptance
-
-Do not attempt these during this Codex session:
-
-- creating a disposable PostgreSQL database;
-- running persistence integration live;
-- running API integration live;
-- running either suite twice;
-- testing real PostgreSQL TRUNCATE behavior;
-- testing real identity restart;
-- testing live record-versus-terminal concurrency.
-
-These are Phase C4B2 and require manual authorization after external review.
-
-## Explicitly forbidden
-
-Do not:
-
-- connect to PostgreSQL;
-- read or print database environment-variable values;
-- set live integration opt-ins;
-- use a real or synthetic reachable PostgreSQL URL;
-- create, inspect, migrate, clean, truncate, or drop a live database;
-- modify production application code;
-- modify ORM models;
-- modify Alembic revisions;
-- modify requirements;
-- install dependencies;
-- implement Docker or CI;
-- modify README;
-- implement Telemetry Read API;
-- modify API routes or schemas;
-- modify Agent Skills;
-- modify legacy files, firmware, certificates, keys, secrets, or .env files;
-- perform Git write operations.
-
-Read-only Git commands are allowed.
+1. compare README claims against current source;
+2. compare endpoint inventory against generated OpenAPI;
+3. verify setting names against Settings;
+4. verify test commands against repository layout;
+5. verify integration prefixes and opt-ins against guard source;
+6. verify the C4B report against Git history and approved user-provided
+   verification facts;
+7. verify the read specification contains no implementation claim;
+8. run the complete offline backend suite;
+9. run pip check;
+10. run git diff --check;
+11. scan changed docs for secrets, local absolute paths, URLs containing
+    credentials, generated temporary identifiers, and stale api_prefix text;
+12. stop for manual external review.
 
 ## Test environment
 
@@ -261,60 +431,44 @@ C:\Users\nazar\Desktop\AirMonitor\backend\.venv\Scripts\python.exe
 
 Every pytest command must use:
 
-- -B;
-- -p no:cacheprovider.
+-B -p no:cacheprovider
 
-No live integration opt-in may be set.
+Do not activate live integration tests.
 
-Do not read or print existing database environment-variable values.
+Do not read or print ambient database URL values.
 
-## Required verification
+## Explicitly forbidden
 
-At minimum run:
+Do not:
 
-1. focused shared-reset unit tests;
-2. focused persistence-fixture lifecycle tests;
-3. focused API-fixture lifecycle tests;
-4. focused sanitization and exception-chaining tests;
-5. existing persistence and API guard tests;
-6. both integration modules in skip-only offline mode;
-7. affected test-infrastructure modules;
-8. complete offline backend suite;
-9. pip check;
-10. guarded import/OpenAPI/engine/no-connection probes;
-11. in-memory source compilation;
-12. git diff --check;
-13. sensitive/generated-path checks;
-14. final read-only diff and status inspection.
+- modify production or test code;
+- implement Telemetry Read API;
+- add authentication;
+- add dependencies;
+- change routes or OpenAPI;
+- modify ORM or Alembic;
+- create or connect to PostgreSQL;
+- run live integration tests;
+- modify .env.example;
+- include credentials or temporary database identifiers;
+- rewrite audit history;
+- perform Git write operations.
 
-Current pre-change baseline:
-
-- 519 passed;
-- 2 skipped.
-
-Expected public API inventory:
-
-- OpenAPI 3.1.0;
-- nine total operations;
-- eight under /api/v1;
-- one /health;
-- unique operation IDs.
+Read-only Git commands are allowed.
 
 ## Definition of done
 
-Phase C4B1 is complete only when:
+Phase C4C is complete only when:
 
-- AUDIT-010 cleanup behavior is implemented for both integration suites;
-- all cleanup behavior is proven offline;
-- destructive work cannot occur before target and schema validation;
-- cleanup is guaranteed through fixture finally paths;
-- identity sequences are reset;
-- error output is sanitized;
-- full offline verification passes;
-- no PostgreSQL or network operation occurs;
-- no production, migration, ORM, requirement, README, legacy, or unrelated file
-  change occurs;
+- README accurately describes current AirMonitor v2;
+- AUDIT-014 is closed;
+- C4B live verification is documented without secrets;
+- Telemetry Read API decisions are explicit and implementation-ready;
+- no production or test file changed;
+- current OpenAPI still contains nine operations;
+- complete offline tests pass;
+- no sensitive information is introduced;
 - Codex performs no Git write operation;
-- final output lists RED failures, implementation, changed files, exact test
-  results, no-connection evidence, limitations, and final Git status.
+- final output lists changed files, verification commands, results,
+  documentation limitations, and exact Git status.
 '@ | Set-Content -Path ".\AGENTS.md" -Encoding UTF8
