@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import os
 from uuid import uuid4
 
@@ -43,6 +44,10 @@ del _DATABASE_URL_TEXT
 
 
 from app.core.config import Settings
+from app.core.exceptions import (
+    ActiveSessionNotFoundError,
+    InvalidTimestampError,
+)
 from app.db.base import Base
 from app.db.dependencies import get_db_session
 from app.db.models import (
@@ -52,6 +57,7 @@ from app.db.models import (
     RawMeasurement,
 )
 from app.main import create_application
+from app.services.measurement import MeasurementService
 from tests.integration_database_reset import reset_application_tables
 
 
@@ -404,3 +410,300 @@ async def test_cancel_session_clears_runtime_state(
     assert runtime_state.active_session_id is None
     assert persisted_session is not None
     assert persisted_session.status == "cancelled"
+
+# Live PostgreSQL concurrency verification
+
+
+async def _create_active_session_for_concurrency(
+    client: AsyncClient,
+    *,
+    scenario: str,
+) -> tuple[int, int, datetime]:
+    created = await client.post(
+        "/api/v1/devices",
+        json={
+            "device_uid": (
+                f"api-concurrency-{scenario}-{uuid4().hex}"
+            ),
+        },
+    )
+    assert created.status_code == 201
+    device_id = created.json()["id"]
+
+    started = await client.post(
+        f"/api/v1/devices/{device_id}/sessions",
+        json={
+            "latitude": 51.1694,
+            "longitude": 71.4491,
+        },
+    )
+    assert started.status_code == 201
+
+    session_payload = started.json()
+    started_at = datetime.fromisoformat(
+        session_payload["started_at"].replace("Z", "+00:00")
+    )
+
+    return (
+        device_id,
+        session_payload["id"],
+        started_at,
+    )
+
+
+async def _run_with_first_device_lock(
+    *,
+    first_service: MeasurementService,
+    first_operation,
+    second_service: MeasurementService,
+    second_operation,
+) -> tuple[object, object]:
+    first_has_device_lock = asyncio.Event()
+    release_first_operation = asyncio.Event()
+    second_attempted_device_lock = asyncio.Event()
+
+    original_first_lock = (
+        first_service.device_repository.get_by_id_for_update
+    )
+    original_second_lock = (
+        second_service.device_repository.get_by_id_for_update
+    )
+
+    async def first_lock(device_id: int):
+        device = await original_first_lock(device_id)
+        first_has_device_lock.set()
+        await release_first_operation.wait()
+        return device
+
+    async def second_lock(device_id: int):
+        second_attempted_device_lock.set()
+        return await original_second_lock(device_id)
+
+    first_service.device_repository.get_by_id_for_update = (
+        first_lock
+    )
+    second_service.device_repository.get_by_id_for_update = (
+        second_lock
+    )
+
+    first_task = asyncio.create_task(first_operation())
+    second_task = None
+
+    try:
+        await asyncio.wait_for(
+            first_has_device_lock.wait(),
+            timeout=5,
+        )
+
+        second_task = asyncio.create_task(second_operation())
+
+        await asyncio.wait_for(
+            second_attempted_device_lock.wait(),
+            timeout=5,
+        )
+
+        # The second transaction has reached the common first row lock.
+        # It must remain blocked while the first transaction owns it.
+        await asyncio.sleep(0.1)
+        assert second_task.done() is False
+
+        release_first_operation.set()
+
+        return tuple(
+            await asyncio.wait_for(
+                asyncio.gather(
+                    first_task,
+                    second_task,
+                    return_exceptions=True,
+                ),
+                timeout=10,
+            )
+        )
+    finally:
+        release_first_operation.set()
+
+        tasks = [first_task]
+        if second_task is not None:
+            tasks.append(second_task)
+
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+
+        await asyncio.gather(
+            *tasks,
+            return_exceptions=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("terminal_method", "terminal_status"),
+    [
+        ("complete_session", "completed"),
+        ("cancel_session", "cancelled"),
+    ],
+)
+async def test_terminal_transition_serializes_before_waiting_record(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    terminal_method: str,
+    terminal_status: str,
+) -> None:
+    device_id, session_id, started_at = (
+        await _create_active_session_for_concurrency(
+            client,
+            scenario=f"{terminal_status}-first",
+        )
+    )
+
+    ended_at = started_at + timedelta(seconds=2)
+    measured_at = started_at + timedelta(seconds=1)
+
+    async with (
+        session_factory() as terminal_db_session,
+        session_factory() as record_db_session,
+    ):
+        terminal_service = MeasurementService(
+            terminal_db_session
+        )
+        record_service = MeasurementService(record_db_session)
+
+        terminal_result, record_result = (
+            await _run_with_first_device_lock(
+                first_service=terminal_service,
+                first_operation=lambda: getattr(
+                    terminal_service,
+                    terminal_method,
+                )(
+                    device_id=device_id,
+                    ended_at=ended_at,
+                ),
+                second_service=record_service,
+                second_operation=lambda: (
+                    record_service.record_measurement(
+                        device_id=device_id,
+                        measured_at=measured_at,
+                        source_message_id=(
+                            f"terminal-first-{uuid4().hex}"
+                        ),
+                        pm25=12.5,
+                    )
+                ),
+            )
+        )
+
+    assert isinstance(terminal_result, MeasurementSession)
+    assert terminal_result.status == terminal_status
+    assert isinstance(
+        record_result,
+        ActiveSessionNotFoundError,
+    )
+
+    async with session_factory() as verification_session:
+        runtime_state = await verification_session.get(
+            DeviceRuntimeState,
+            device_id,
+        )
+        persisted_session = await verification_session.get(
+            MeasurementSession,
+            session_id,
+        )
+        measurement_count = await verification_session.scalar(
+            select(func.count())
+            .select_from(RawMeasurement)
+            .where(RawMeasurement.session_id == session_id)
+        )
+
+    assert runtime_state is not None
+    assert runtime_state.measurement_enabled is False
+    assert runtime_state.active_session_id is None
+
+    assert persisted_session is not None
+    assert persisted_session.status == terminal_status
+    assert persisted_session.sample_count == 0
+    assert measurement_count == 0
+
+
+@pytest.mark.parametrize(
+    ("terminal_method", "terminal_status"),
+    [
+        ("complete_session", "completed"),
+        ("cancel_session", "cancelled"),
+    ],
+)
+async def test_record_serializes_before_waiting_terminal_transition(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    terminal_method: str,
+    terminal_status: str,
+) -> None:
+    device_id, session_id, started_at = (
+        await _create_active_session_for_concurrency(
+            client,
+            scenario=f"record-before-{terminal_status}",
+        )
+    )
+
+    measured_at = started_at + timedelta(seconds=2)
+    contradictory_end = started_at + timedelta(seconds=1)
+
+    async with (
+        session_factory() as record_db_session,
+        session_factory() as terminal_db_session,
+    ):
+        record_service = MeasurementService(record_db_session)
+        terminal_service = MeasurementService(
+            terminal_db_session
+        )
+
+        record_result, terminal_result = (
+            await _run_with_first_device_lock(
+                first_service=record_service,
+                first_operation=lambda: (
+                    record_service.record_measurement(
+                        device_id=device_id,
+                        measured_at=measured_at,
+                        source_message_id=(
+                            f"record-first-{uuid4().hex}"
+                        ),
+                        pm25=15.0,
+                    )
+                ),
+                second_service=terminal_service,
+                second_operation=lambda: getattr(
+                    terminal_service,
+                    terminal_method,
+                )(
+                    device_id=device_id,
+                    ended_at=contradictory_end,
+                ),
+            )
+        )
+
+    assert isinstance(record_result, RawMeasurement)
+    assert isinstance(terminal_result, InvalidTimestampError)
+
+    async with session_factory() as verification_session:
+        runtime_state = await verification_session.get(
+            DeviceRuntimeState,
+            device_id,
+        )
+        persisted_session = await verification_session.get(
+            MeasurementSession,
+            session_id,
+        )
+        measurement_count = await verification_session.scalar(
+            select(func.count())
+            .select_from(RawMeasurement)
+            .where(RawMeasurement.session_id == session_id)
+        )
+
+    assert runtime_state is not None
+    assert runtime_state.measurement_enabled is True
+    assert runtime_state.active_session_id == session_id
+
+    assert persisted_session is not None
+    assert persisted_session.status == "active"
+    assert persisted_session.ended_at is None
+    assert persisted_session.sample_count == 1
+    assert measurement_count == 1
