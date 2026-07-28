@@ -1,5 +1,7 @@
 """Tests for centralized application configuration."""
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -9,13 +11,13 @@ from app.core.config import Settings
 from app.main import create_application
 
 
+BACKEND_DIRECTORY = Path(__file__).resolve().parents[1]
 ENVIRONMENT_VARIABLES = (
     "AIRMONITOR_APP_NAME",
     "AIRMONITOR_APP_VERSION",
     "AIRMONITOR_SERVICE_NAME",
     "AIRMONITOR_ENVIRONMENT",
     "AIRMONITOR_DEBUG",
-    "AIRMONITOR_API_PREFIX",
     "AIRMONITOR_DATABASE_URL",
     "AIRMONITOR_DATABASE_ECHO",
     "AIRMONITOR_DATABASE_POOL_PRE_PING",
@@ -23,7 +25,7 @@ ENVIRONMENT_VARIABLES = (
 
 
 def clear_settings_environment(monkeypatch: MonkeyPatch) -> None:
-    """Remove supported overrides so defaults can be tested in isolation."""
+    """Remove configured and stale overrides for isolated settings tests."""
     for variable_name in ENVIRONMENT_VARIABLES:
         monkeypatch.delenv(variable_name, raising=False)
 
@@ -57,7 +59,6 @@ def test_settings_defaults(monkeypatch: MonkeyPatch) -> None:
     assert settings.service_name == "airmonitor-api"
     assert settings.environment == "development"
     assert settings.debug is False
-    assert settings.api_prefix == "/api/v1"
     assert settings.database_url == (
         "postgresql+asyncpg://airmonitor:airmonitor@localhost:5432/airmonitor"
     )
@@ -71,7 +72,6 @@ def test_settings_environment_variable_overrides(monkeypatch: MonkeyPatch) -> No
     monkeypatch.setenv("AIRMONITOR_SERVICE_NAME", "airmonitor-test-api")
     monkeypatch.setenv("AIRMONITOR_ENVIRONMENT", "test")
     monkeypatch.setenv("AIRMONITOR_DEBUG", "true")
-    monkeypatch.setenv("AIRMONITOR_API_PREFIX", "/test/api")
 
     settings = Settings(_env_file=None)
 
@@ -80,7 +80,25 @@ def test_settings_environment_variable_overrides(monkeypatch: MonkeyPatch) -> No
     assert settings.service_name == "airmonitor-test-api"
     assert settings.environment == "test"
     assert settings.debug is True
-    assert settings.api_prefix == "/test/api"
+
+
+def test_settings_no_longer_supports_api_prefix() -> None:
+    settings = Settings(_env_file=None)
+
+    assert "api_prefix" not in Settings.model_fields
+    assert "api_prefix" not in settings.model_dump()
+
+
+def test_env_example_no_longer_advertises_api_prefix() -> None:
+    environment_names = {
+        line.partition("=")[0]
+        for line in (BACKEND_DIRECTORY / ".env.example")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line and not line.startswith("#")
+    }
+
+    assert "AIRMONITOR_API_PREFIX" not in environment_names
 
 
 @pytest.mark.parametrize(

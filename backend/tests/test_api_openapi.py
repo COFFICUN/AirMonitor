@@ -3,6 +3,8 @@
 from contextlib import ExitStack
 from unittest.mock import patch
 
+import pytest
+
 from app.core.config import Settings
 from app.main import create_application
 
@@ -88,6 +90,24 @@ EXPECTED_OPERATION_CONTRACTS = {
         "MeasurementCreateRequest",
     ),
 }
+
+
+def test_stale_api_prefix_environment_variable_preserves_openapi_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AIRMONITOR_API_PREFIX", raising=False)
+    baseline_schema = create_application(Settings(_env_file=None)).openapi()
+    monkeypatch.setenv(
+        "AIRMONITOR_API_PREFIX",
+        "/phase-c4a-stale-prefix",
+    )
+
+    stale_settings = Settings(_env_file=None)
+    stale_schema = create_application(stale_settings).openapi()
+
+    assert "api_prefix" not in Settings.model_fields
+    assert "api_prefix" not in stale_settings.model_dump()
+    assert stale_schema == baseline_schema
 
 
 def test_openapi_generation_is_connection_free_and_covers_exact_scope() -> None:
