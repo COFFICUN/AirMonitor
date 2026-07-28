@@ -1,5 +1,3 @@
-Set-Location "C:\Users\nazar\Desktop\AirMonitor"
-
 @'
 # AirMonitor Agent Instructions
 
@@ -22,117 +20,128 @@ PostgreSQL, Pydantic, and pytest.
 
 ## Current active task
 
-Sprint 8 Phase C4A — Production Configuration Contract.
+Sprint 8 Phase C4B1 — Offline Integration Database Isolation.
 
-Implement only:
+Implement only AUDIT-010:
 
-- complete AUDIT-006 by replacing literal database-URL comparison with
-  structural production-target validation;
-- close AUDIT-011 by removing the inert api_prefix setting while preserving
-  the fixed /api/v1 route contract.
+- make persistence integration repeatable against one approved disposable
+  PostgreSQL database;
+- make API integration repeatable against one approved disposable PostgreSQL
+  database;
+- clean application tables before and after each integration suite;
+- restore an empty database after normal completion and test-body failure;
+- reset PostgreSQL identity sequences.
 
-Read completely before changing files:
+This first pass is strictly offline.
+
+Do not connect to PostgreSQL during this Codex session.
+
+Read completely:
 
 docs/reviews/sprint-8-full-codebase-audit.md
 docs/reviews/sprint-8-final-verification.md
 
-Preserve all completed Phase C1, C2A, C2B, and C3 behavior.
+Preserve all completed Phase C1, C2A, C2B, C3, and C4A behavior.
 
-## Approved production database policy
+## Approved isolation policy
 
-Production must continue rejecting:
+Each live integration suite must follow this order:
 
-- debug=true;
-- database_echo=true;
-- the built-in development database target and its canonical equivalents.
+1. require its explicit live-test opt-in;
+2. require its dedicated test database URL;
+3. validate the target with the existing disposable-database guard;
+4. construct its test engine;
+5. run its existing schema and Alembic preflight;
+6. reset all AirMonitor application tables;
+7. verify the application tables are empty;
+8. yield control to the integration suite;
+9. reset all AirMonitor application tables in a finally path;
+10. dispose the engine in an outer finally path.
 
-The development target must be detected structurally rather than by raw string
-equality.
+No destructive database action may occur before target validation and schema
+preflight succeed.
 
-Use an existing trusted URL parser such as SQLAlchemy URL parsing. Do not
-implement database URL parsing using split(), regular expressions, or manual
-credential extraction.
+## Approved reset operation
 
-The structural comparison must account for:
+Use one test-only PostgreSQL TRUNCATE operation containing every table from
+AirMonitor ORM metadata.
 
-- driver name normalization;
-- decoded username;
-- decoded password;
-- normalized host;
-- normalized port;
-- decoded database name;
-- PostgreSQL default port 5432 when the port is omitted;
-- host case differences;
-- a trailing dot in localhost;
-- localhost, IPv4 loopback, and IPv6 loopback equivalence;
-- percent-encoded equivalents;
-- harmless query options that must not make the built-in target acceptable.
+Required behavior:
 
-Do not resolve hostnames and do not perform DNS or network access.
+- derive the table inventory from the existing SQLAlchemy Base metadata;
+- include every AirMonitor application table;
+- execute one TRUNCATE statement;
+- use RESTART IDENTITY;
+- do not use CASCADE;
+- execute inside an explicit transaction;
+- await transaction completion;
+- do not maintain a separate manually duplicated table-name list.
 
-Production URLs containing query keys that can override connection identity
-must be rejected as ambiguous. At minimum cover:
+The currently expected table inventory is:
 
-- host;
-- port;
-- database;
-- dbname;
-- user;
-- username;
-- password;
-- service;
-- servicefile.
+- devices;
+- device_runtime_state;
+- measurement_sessions;
+- raw_measurements.
 
-Query-key comparison must be case-insensitive.
+The implementation must fail closed if metadata has no tables or if reset
+execution fails.
 
-The implementation must not print, log, format, interpolate, serialize, or
-otherwise expose:
+Do not use:
 
-- database URLs;
-- usernames;
-- passwords;
-- hosts;
-- ports;
-- database names;
-- query values;
-- parsed URL representations.
+- Base.metadata.drop_all;
+- Base.metadata.create_all;
+- Alembic upgrade or downgrade;
+- database creation or deletion;
+- schema deletion;
+- CASCADE;
+- row-by-row DELETE;
+- production application settings.
 
-Validation failures must use short fixed messages with no input values.
+## Error-sanitization policy
 
-Existing Settings input hiding and SQLAlchemy hide_parameters=True behavior
-must remain intact.
+Use fixed messages only.
 
-Development and test configurations must retain their current behavior.
+Persistence suite:
 
-## Approved API-prefix policy
+- `Persistence integration database preflight failed.`
+- `Persistence integration database reset failed.`
 
-The public API contract remains fixed at:
+API suite:
 
-/api/v1
+- `API integration database preflight failed.`
+- `API integration database reset failed.`
 
-Remove the inert api_prefix field rather than wiring it into router
-composition.
+A raw driver, SQLAlchemy, SQL, URL, host, port, username, password, database
+name, filesystem path, or sentinel value must not appear in the public failure.
 
-Remove:
+Sanitized failures must not retain the original exception through __cause__ or
+__context__.
 
-- Settings.api_prefix;
-- its default value;
-- its AIRMONITOR_API_PREFIX example entry;
-- tests or assertions that represent it as a supported configuration option.
+Engine disposal must still run when preflight, initial reset, suite execution,
+or final reset raises.
 
-Do not:
+## Shared test-only implementation
 
-- make routes environment-dependent;
-- introduce a replacement prefix setting;
-- change router prefixes;
-- change paths;
-- change operation IDs;
-- change request or response schemas;
-- change successful status codes.
+A small shared module under backend/tests is allowed and preferred when both
+integration suites use the exact same reset logic.
 
-A stale AIRMONITOR_API_PREFIX process variable must not change routes or
-OpenAPI. It may be ignored as an unsupported environment variable according
-to the existing settings-source behavior.
+Production application modules under backend/app must not depend on the test
+helper.
+
+The shared helper may accept:
+
+- an AsyncEngine or AsyncConnection;
+- SQLAlchemy MetaData;
+- a fixed suite-specific safe error message.
+
+It must not:
+
+- read environment variables;
+- create its own application settings;
+- decide whether a target is safe;
+- connect before the calling suite completes target validation;
+- log or render a database URL.
 
 ## Required workflow
 
@@ -141,105 +150,103 @@ skills.
 
 Use strict test-driven development:
 
-1. inspect current settings defaults, validation, environment-source behavior,
-   router composition, .env.example, and relevant tests;
-2. add focused failing regression tests;
-3. demonstrate that the failures correspond to AUDIT-006 and AUDIT-011;
-4. implement the smallest coherent fix;
-5. rerun focused tests;
-6. run the complete offline backend suite;
-7. perform a bounded adversarial review;
-8. stop for manual external review.
+1. inspect both integration fixtures and existing guards;
+2. design focused offline regression tests;
+3. demonstrate RED failures;
+4. implement the smallest shared test-only reset mechanism;
+5. integrate it into both suite fixtures;
+6. run focused offline tests;
+7. run the complete offline suite;
+8. perform a bounded adversarial review;
+9. stop for manual external review.
 
 Do not implement before RED failures are demonstrated.
 
-## Allowed production scope
+## Allowed files
 
 Modify only the minimum necessary subset of:
 
-- backend/app/core/config.py
-- backend/.env.example
+- backend/tests/persistence_guard.py
+- backend/tests/api_integration_guard.py
+- backend/tests/test_persistence_integration.py
+- backend/tests/test_api_integration.py
+- backend/tests/test_persistence_guard.py
+- backend/tests/test_api_integration_guard.py
+- one new shared test-only helper module under backend/tests
+- one new focused offline test module for database reset behavior
 
-The router should not require a production change because /api/v1 already is
-the correct fixed contract. Stop and report before changing router code unless
-current source evidence proves it is necessary.
+No production application file change is expected.
 
-## Allowed test scope
+Stop and report instead of modifying backend/app.
 
-Modify only the minimum necessary subset of:
+## Acceptance criteria
 
-- backend/tests/test_config.py
-- backend/tests/test_api_openapi.py
-- backend/tests/test_application_composition.py
-- backend/tests/test_api_routes.py
-- one focused new configuration test module only when it materially improves
-  clarity
+Prove offline through mocks, fake engines, fake connections, fixture generators,
+and fail-fast network guards:
 
-Do not modify live integration guards or database cleanup behavior.
+1. Both suites use the same shared reset implementation.
+2. Target validation occurs before engine construction or reset execution.
+3. Schema/Alembic preflight occurs before the first reset.
+4. Initial reset occurs before the suite body.
+5. Final reset occurs after normal suite completion.
+6. Final reset occurs after an exception from the suite body.
+7. Engine disposal occurs after normal completion.
+8. Engine disposal occurs after preflight failure.
+9. Engine disposal occurs after initial reset failure.
+10. Engine disposal occurs after suite-body failure.
+11. Engine disposal occurs after final reset failure.
+12. The reset statement contains every table in Base metadata.
+13. The reset is one TRUNCATE statement.
+14. The reset uses RESTART IDENTITY.
+15. The reset does not contain CASCADE.
+16. No drop_all, create_all, Alembic mutation, database creation, or database
+    deletion occurs.
+17. Reset failure messages are fixed and sanitized.
+18. Reset failures have no retained __cause__.
+19. Reset failures have no retained __context__.
+20. Raw SQLAlchemy/driver sentinel values do not appear in captured output.
+21. A stale non-empty database no longer causes the suite to fail before reset.
+22. A post-reset emptiness check still fails closed if tables are not empty.
+23. Existing protected-target, local-host, driver, query, prefix, and opt-in
+    guards remain unchanged.
+24. No live integration suite is activated during offline verification.
+25. No PostgreSQL, DNS, socket, asyncpg, engine connection, or schema creation
+    occurs during this phase.
+26. Public API and OpenAPI remain unchanged.
+27. ORM models and Alembic files remain unchanged.
 
-## AUDIT-006 acceptance criteria
+## Explicitly deferred live acceptance
 
-Prove all of the following:
+Do not attempt these during this Codex session:
 
-1. Production still rejects debug=true.
-2. Production still rejects database_echo=true.
-3. Production rejects the exact built-in development database URL.
-4. Production rejects the equivalent URL when port 5432 is omitted.
-5. Production rejects equivalent host case variants.
-6. Production rejects localhost with a trailing dot.
-7. Production rejects equivalent IPv4 loopback representation.
-8. Production rejects equivalent IPv6 loopback representation.
-9. Production rejects equivalent percent-encoded components.
-10. Harmless query options do not bypass development-target rejection.
-11. Target-identity override query keys are rejected in production.
-12. Query-key matching is case-insensitive.
-13. A genuinely distinct explicit PostgreSQL+asyncpg production target is
-    accepted.
-14. Existing driver validation remains intact.
-15. Development and test continue accepting their current configurations.
-16. Validation errors do not contain the candidate URL or any component,
-    credential, query value, or sentinel.
-17. Captured logs and stdout/stderr do not contain sensitive target values.
-18. Validation performs no DNS lookup or network call.
-19. Engine construction remains lazy and performs no connection.
-20. hide_parameters=True remains enabled.
+- creating a disposable PostgreSQL database;
+- running persistence integration live;
+- running API integration live;
+- running either suite twice;
+- testing real PostgreSQL TRUNCATE behavior;
+- testing real identity restart;
+- testing live record-versus-terminal concurrency.
 
-## AUDIT-011 acceptance criteria
-
-Prove all of the following:
-
-1. Settings no longer contains api_prefix.
-2. The built-in settings defaults no longer contain api_prefix.
-3. backend/.env.example no longer advertises AIRMONITOR_API_PREFIX.
-4. Setting a synthetic AIRMONITOR_API_PREFIX does not change routes.
-5. The public path remains /api/v1.
-6. OpenAPI still contains nine total operations.
-7. OpenAPI still contains eight /api/v1 operations and one /health operation.
-8. Operation IDs remain unique and unchanged.
-9. Request schemas, success response schemas, and successful status codes
-   remain unchanged.
-10. No replacement dynamic-prefix mechanism is introduced.
+These are Phase C4B2 and require manual authorization after external review.
 
 ## Explicitly forbidden
 
 Do not:
 
-- implement AUDIT-010;
-- modify integration database setup or cleanup;
 - connect to PostgreSQL;
-- inspect, create, migrate, clean, truncate, or drop a database;
-- read or print real database environment-variable values;
+- read or print database environment-variable values;
+- set live integration opt-ins;
+- use a real or synthetic reachable PostgreSQL URL;
+- create, inspect, migrate, clean, truncate, or drop a live database;
+- modify production application code;
+- modify ORM models;
+- modify Alembic revisions;
+- modify requirements;
+- install dependencies;
+- implement Docker or CI;
+- modify README;
 - implement Telemetry Read API;
-- change routes or operation IDs;
-- change domain behavior or error codes;
-- change chronology or integer-boundary behavior;
-- change ORM models, constraints, indexes, relationships, or database types;
-- create or modify Alembic revisions;
-- modify README during this phase;
-- modify the audit or final-verification reports;
-- add authentication, authorization, CORS, rate limiting, logging, Docker, or
-  CI;
-- modify requirements or install dependencies;
+- modify API routes or schemas;
 - modify Agent Skills;
 - modify legacy files, firmware, certificates, keys, secrets, or .env files;
 - perform Git write operations.
@@ -252,15 +259,12 @@ Use only:
 
 C:\Users\nazar\Desktop\AirMonitor\backend\.venv\Scripts\python.exe
 
-Do not modify this environment.
-
-All pytest commands must use:
+Every pytest command must use:
 
 - -B;
-- -p no:cacheprovider;
-- no live integration opt-ins;
-- no PostgreSQL connection;
-- synthetic configuration values created only inside tests.
+- -p no:cacheprovider.
+
+No live integration opt-in may be set.
 
 Do not read or print existing database environment-variable values.
 
@@ -268,51 +272,49 @@ Do not read or print existing database environment-variable values.
 
 At minimum run:
 
-1. focused structural production-target tests;
-2. focused sensitive-validation-output tests;
-3. focused api_prefix-removal tests;
-4. existing config and database-engine tests;
-5. affected composition, route, and OpenAPI tests;
-6. the complete offline backend suite;
-7. pip check;
-8. guarded OpenAPI generation;
-9. import, factory, lifespan, and engine no-connection guards;
-10. a guard proving no DNS or socket operation occurred during validation;
-11. in-memory source compilation without repository bytecode;
+1. focused shared-reset unit tests;
+2. focused persistence-fixture lifecycle tests;
+3. focused API-fixture lifecycle tests;
+4. focused sanitization and exception-chaining tests;
+5. existing persistence and API guard tests;
+6. both integration modules in skip-only offline mode;
+7. affected test-infrastructure modules;
+8. complete offline backend suite;
+9. pip check;
+10. guarded import/OpenAPI/engine/no-connection probes;
+11. in-memory source compilation;
 12. git diff --check;
 13. sensitive/generated-path checks;
 14. final read-only diff and status inspection.
 
-Current pre-change offline baseline:
+Current pre-change baseline:
 
-- 356 passed;
+- 519 passed;
 - 2 skipped.
 
-Expected public API inventory remains:
+Expected public API inventory:
 
 - OpenAPI 3.1.0;
 - nine total operations;
-- eight operations under /api/v1;
-- one /health operation;
+- eight under /api/v1;
+- one /health;
 - unique operation IDs.
 
 ## Definition of done
 
-Phase C4A is complete only when:
+Phase C4B1 is complete only when:
 
-- RED tests reproduce the canonical-equivalent production-target bypass;
-- RED tests reproduce the inert api_prefix configuration;
-- production-target comparison is structural and sanitized;
-- canonical variants of the built-in development target are rejected;
-- ambiguous target-override query keys are rejected;
-- api_prefix is removed from Settings and .env.example;
-- the fixed /api/v1 API contract is preserved;
-- the complete offline suite passes;
-- no network or PostgreSQL connection occurs;
-- no migration, ORM, integration-cleanup, dependency, README, legacy, or
-  unrelated change occurs;
+- AUDIT-010 cleanup behavior is implemented for both integration suites;
+- all cleanup behavior is proven offline;
+- destructive work cannot occur before target and schema validation;
+- cleanup is guaranteed through fixture finally paths;
+- identity sequences are reset;
+- error output is sanitized;
+- full offline verification passes;
+- no PostgreSQL or network operation occurs;
+- no production, migration, ORM, requirement, README, legacy, or unrelated file
+  change occurs;
 - Codex performs no Git write operation;
-- the final response lists RED failures, changed files, exact commands and
-  results, OpenAPI compatibility, no-network evidence, remaining limitations,
-  and final Git status.
+- final output lists RED failures, implementation, changed files, exact test
+  results, no-connection evidence, limitations, and final Git status.
 '@ | Set-Content -Path ".\AGENTS.md" -Encoding UTF8
