@@ -208,7 +208,6 @@ async def test_complete_http_lifecycle_and_rollback_behavior(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     device_uid = f"api-lifecycle-{uuid4().hex}"
-    measured_at = datetime.now(UTC).isoformat()
 
     create_response = await client.post(
         "/api/v1/devices",
@@ -259,7 +258,9 @@ async def test_complete_http_lifecycle_and_rollback_behavior(
         json={"latitude": 51.1694, "longitude": 71.4491},
     )
     assert session_response.status_code == 201
-    session_id = session_response.json()["id"]
+    session_payload = session_response.json()
+    session_id = session_payload["id"]
+    measured_at = session_payload["started_at"]
 
     second_session = await client.post(
         f"/api/v1/devices/{device_id}/sessions",
