@@ -1,357 +1,354 @@
 # AirMonitor
 
-AirMonitor is a portable IoT system for collecting, storing, and visualizing air-quality and urban microclimate measurements.
+AirMonitor is a portable air-quality and microclimate monitoring project built
+around an M5Stack/ESP32 device, a PMSA003 particulate sensor, and an SHT30
+temperature and humidity sensor.
 
-The project combines an ESP32-based M5Stack device, a PMSA003 particulate-matter sensor, an SHT31 temperature and humidity sensor, a Flask backend, a SQLite database, and a browser-based dashboard with charts, AQI indicators, measurement sessions, and geolocation-based map views.
+The repository contains two deliberately separate application generations:
 
-> **Project status:** this repository contains the original diploma implementation, preserved as **AirMonitor v1.0**. A portfolio-oriented v2.0 is planned with FastAPI, PostgreSQL, SQLAlchemy, Alembic, Docker, automated tests, and CI/CD.
+- **AirMonitor v1** is the stable legacy diploma implementation at the
+  repository root. It uses Flask, SQLite, the original firmware, and the
+  legacy browser dashboard.
+- **AirMonitor v2** is the active backend under `backend/`. It uses FastAPI,
+  PostgreSQL, SQLAlchemy asyncio, Alembic, Pydantic settings, and pytest.
 
-## Main capabilities
+The `main` branch is the stable legacy line. AirMonitor v2 development is based
+on `develop` and uses focused feature, fix, test, and documentation branches.
+Root v1 files remain reference material unless a change explicitly targets
+the legacy application.
 
-- Measures PM1.0, PM2.5, PM10, temperature, humidity, and particle counts.
-- Displays live sensor values and device status on the M5Stack screen.
-- Sends JSON measurements from the ESP32 to the backend over Wi-Fi.
-- Starts and stops geolocated measurement sessions from the web interface.
-- Stores raw measurements and session summaries in SQLite.
-- Calculates PM2.5-based AQI and a simplified EPA NowCast estimate.
-- Builds a smoothed PM2.5 chart for the latest session.
-- Shows AQI markers, approximate zones, and a measurement route on a Leaflet map.
-- Exports completed sessions to CSV.
-- Provides health and status endpoints for diagnostics.
-
-## System architecture
-
-```mermaid
-flowchart LR
-    PMS[PMSA003<br/>PM and particle sensor] --> ESP[M5Stack Basic / ESP32]
-    SHT[SHT31<br/>temperature and humidity] --> ESP
-    ESP -->|HTTPS JSON POST| API[Flask backend]
-    Browser[Browser geolocation<br/>and dashboard] -->|REST requests| API
-    API --> DB[(SQLite)]
-    API --> UI[HTML / CSS / JavaScript dashboard]
-    UI --> Charts[Chart.js]
-    UI --> Map[Leaflet map]
-```
-
-## Hardware
-
-| Component | Purpose |
-|---|---|
-| M5Stack Basic v2.7 / ESP32 | Main controller, Wi-Fi communication, and local display |
-| PMSA003 | PM1.0, PM2.5, PM10, and particle-count measurements |
-| SHT31 | Temperature and relative-humidity measurements |
-| USB power bank | Portable power supply |
-
-### Sensor connections
-
-| Sensor pin | M5Stack / ESP32 pin |
-|---|---|
-| PMSA003 VCC | 5 V |
-| PMSA003 GND | GND |
-| PMSA003 TXD | GPIO16 / RX2 |
-| PMSA003 RXD | GPIO17 / TX2 |
-| SHT31 VDD | 3.3 V or 5 V, depending on the module |
-| SHT31 GND | GND |
-| SHT31 SDA | GPIO21 |
-| SHT31 SCL | GPIO22 |
-
-## Firmware behavior
-
-The Arduino sketch is stored in `test1_final.ino`.
-
-- Sensor readings are refreshed every 2 seconds.
-- Measurements are sent automatically every 5 seconds.
-- The interface is refreshed approximately every 800 ms.
-- Wi-Fi reconnection is checked every 10 seconds.
-- PM values are smoothed with a five-sample buffer before display and transmission.
-- Button A switches between the main, particle-count, and system-status screens.
-- Button B performs a manual measurement upload.
-- Button C enables or disables automatic server uploads.
-
-The firmware sends payloads similar to:
-
-```json
-{
-  "device_uid": "airmonitor-main",
-  "sent_at_utc": "2026-07-21T07:00:00Z",
-  "temperature": 24.6,
-  "humidity": 42.1,
-  "pm1": 8,
-  "pm25": 14,
-  "pm10": 19,
-  "pc0_3": 1024,
-  "pc0_5": 340,
-  "pc1_0": 81,
-  "pc2_5": 12,
-  "pc5_0": 2,
-  "pc10": 0
-}
-```
-
-The backend assigns latitude and longitude from the active browser-controlled measurement session rather than trusting coordinates sent by the device.
-
-## Technology stack
-
-### Firmware
-
-- C++ / Arduino
-- M5Stack library
-- WiFi and HTTPClient
-- ArduinoJson
-- Adafruit SHT31
-- Plantower PMS7003-compatible library
-
-### Backend
-
-- Python 3.13
-- Flask 3.1
-- SQLite
-- Python `zoneinfo` with `tzdata`
-
-### Frontend
-
-- HTML, CSS, and JavaScript in a single template
-- Bootstrap 5
-- Font Awesome
-- Chart.js
-- Leaflet
-
-## Repository structure
+## Repository layout
 
 ```text
 AirMonitor/
-├── app.py                 # Flask backend, REST endpoints, analytics, and HTML rendering
-├── index.html             # Dashboard template with embedded CSS and JavaScript
-├── test1_final.ino        # ESP32 / M5Stack firmware
-├── secrets.example.h      # Public Wi-Fi credential template
-├── init_db.py             # Creates a clean local SQLite database
-├── schema.sql             # Database schema and default device record
-├── requirements.txt       # Reproducible Python dependencies
-├── .gitignore             # Excludes credentials, certificates, databases, and local files
-├── .gitattributes         # Normalizes text files and line endings
-├── LICENSE
-└── README.md
+├── app.py                    # AirMonitor v1 Flask application
+├── index.html                # AirMonitor v1 browser dashboard
+├── init_db.py                # AirMonitor v1 SQLite initialization
+├── schema.sql                # AirMonitor v1 SQLite schema
+├── test1_final.ino           # M5Stack/ESP32 firmware
+├── secrets.example.h         # Firmware credential template
+├── requirements.txt          # AirMonitor v1 requirements
+├── backend/
+│   ├── app/                  # AirMonitor v2 FastAPI application
+│   ├── alembic/              # PostgreSQL migrations
+│   ├── tests/                # Offline and opt-in integration tests
+│   ├── .env.example          # v2 settings template
+│   ├── requirements.txt      # v2 runtime requirements
+│   └── requirements-dev.txt  # v2 test requirements
+└── docs/
+    ├── reviews/              # Audit and verification records
+    └── specs/                # Approved future contracts
 ```
 
-The following local files are intentionally excluded from Git:
+## Hardware context
 
-```text
-.venv/
-secrets.h
-sensor_data.db
-*.pem
-*.key
-.env
-```
+The physical monitor combines:
 
-## Database model
-
-The current application uses these primary entities:
-
-| Table | Purpose |
+| Component | Role |
 |---|---|
-| `devices` | Registered AirMonitor devices |
-| `device_runtime_state` | Active session, measurement state, and current fixed coordinates |
-| `raw_measurements` | Individual packets received from the ESP32 |
-| `measurement_sessions` | Aggregated summary of a geolocated measurement session |
-| `raw_session_links` | Links raw packets to their session |
-| `aggregated_measurements` | Reserved legacy table for time-window aggregation |
+| M5Stack/ESP32 | Controller, display, and Wi-Fi communication |
+| PMSA003 | PM1, PM2.5, PM10, and particle-count measurements |
+| SHT30 | Temperature and relative-humidity measurements |
+| Portable power source | Mobile monitoring |
 
-The production database is not published because it can contain real geolocation and measurement history.
+AirMonitor is intended for mobile collection of air-quality and local
+microclimate readings. The legacy firmware and UI remain at the repository
+root. AirMonitor v2 currently provides the backend write and lifecycle
+foundation; it does not yet replace every v1 dashboard or analytical feature.
 
-## REST endpoints
+## AirMonitor v2 architecture
 
-| Method | Endpoint | Purpose |
+AirMonitor v2 is a modular asynchronous API:
+
+```text
+FastAPI route
+  -> request validation and dependency injection
+  -> query or transactional application service
+  -> repository
+  -> SQLAlchemy AsyncSession
+  -> PostgreSQL
+```
+
+- The FastAPI application owns its database engine and async session factory.
+- Each database-backed request receives one request-scoped `AsyncSession`.
+- Query services are read-only; write services own transaction boundaries.
+- SQLAlchemy repositories issue parameterized statements and never own
+  commits or rollbacks.
+- The FastAPI lifespan disposes the application-owned async engine at
+  shutdown.
+- Alembic owns PostgreSQL schema evolution. The current sole head is
+  `a4f9c2e7d1b6`.
+- Pydantic validates request bodies and environment-backed settings.
+- pytest covers schemas, services, repositories, routes, errors, migrations,
+  application composition, and guarded integration behavior.
+
+The implemented v2 domain uses four PostgreSQL tables:
+
+- `devices`
+- `device_runtime_state`
+- `measurement_sessions`
+- `raw_measurements`
+
+## Current v2 capabilities
+
+The current backend implements:
+
+- service health;
+- device creation and retrieval;
+- device activation and deactivation;
+- measurement-session start and active-session retrieval;
+- session completion and cancellation;
+- raw measurement ingestion;
+- stable `ErrorResponse` envelopes for validation, domain, framework, and
+  unexpected failures;
+- timezone-aware timestamp normalization to UTC;
+- rejection of measurements before their session start;
+- rejection of terminal timestamps before the session start or latest stored
+  measurement;
+- rejection of non-finite PM values;
+- PostgreSQL `INTEGER` boundaries for public device IDs and particle counts;
+- application-owned async engine/session lifecycle.
+
+Raw measurement history and session history list endpoints are **not currently
+implemented**. Their approved future design is documented in
+`docs/specs/telemetry-read-api.md`.
+
+## Current v2 OpenAPI operations
+
+The guarded offline OpenAPI schema is version `3.1.0` and currently contains
+exactly nine operations: eight under `/api/v1` and one health operation.
+Operation IDs are unique.
+
+| Method | Path | Operation ID | Purpose |
+|---|---|---|---|
+| `POST` | `/api/v1/devices` | `create_device` | Create a device and runtime state |
+| `GET` | `/api/v1/devices/{device_id}` | `get_device` | Retrieve a device |
+| `PATCH` | `/api/v1/devices/{device_id}/status` | `set_device_status` | Activate or deactivate a device |
+| `POST` | `/api/v1/devices/{device_id}/sessions` | `start_measurement_session` | Start a measurement session |
+| `GET` | `/api/v1/devices/{device_id}/sessions/active` | `get_active_measurement_session` | Retrieve the active session |
+| `POST` | `/api/v1/devices/{device_id}/sessions/active/complete` | `complete_active_measurement_session` | Complete the active session |
+| `POST` | `/api/v1/devices/{device_id}/sessions/active/cancel` | `cancel_active_measurement_session` | Cancel the active session |
+| `POST` | `/api/v1/devices/{device_id}/measurements` | `record_raw_measurement` | Store one raw reading |
+| `GET` | `/health` | `get_health_health_get` | Return service health |
+
+Every current v2 path is fixed in source. There is no supported configurable
+API-prefix setting.
+
+## Supported v2 settings
+
+`backend/app/core/config.py` defines the complete supported settings contract.
+Settings use the `AIRMONITOR_` environment prefix and may be loaded from
+`backend/.env`.
+
+| Environment variable | Settings field | Type/default or policy |
 |---|---|---|
-| `GET` | `/` | Render the dashboard |
-| `POST` | `/start_measurement` | Start a session using browser latitude and longitude |
-| `POST` | `/stop_measurement` | Stop the current session |
-| `POST` | `/update_location` | Initialize or refresh the active measurement location |
-| `POST` | `/update` | Receive a measurement packet from the ESP32 |
-| `GET` | `/api/measurement-status` | Return the current measurement state |
-| `GET` | `/api/location-status` | Return location and session status |
-| `GET` | `/api/live` | Return the live dashboard payload |
-| `GET` | `/api/chart` | Return chart data for the active or latest session |
-| `GET` | `/api/map` | Return map points and route data |
-| `GET` | `/api/nowcast` | Return the simplified NowCast result |
-| `GET` | `/export/csv` | Export session summaries as CSV |
-| `GET` | `/health` | Return server, device, and database diagnostics |
+| `AIRMONITOR_APP_NAME` | `app_name` | String; default `AirMonitor API` |
+| `AIRMONITOR_APP_VERSION` | `app_version` | String; default `2.0.0` |
+| `AIRMONITOR_SERVICE_NAME` | `service_name` | String; default `airmonitor-api` |
+| `AIRMONITOR_ENVIRONMENT` | `environment` | `development`, `test`, or `production`; default `development` |
+| `AIRMONITOR_DEBUG` | `debug` | Boolean; default `false`; forbidden in production |
+| `AIRMONITOR_DATABASE_URL` | `database_url` | PostgreSQL with the `postgresql+asyncpg` driver; configure locally without committing it |
+| `AIRMONITOR_DATABASE_ECHO` | `database_echo` | Boolean; default `false`; forbidden in production |
+| `AIRMONITOR_DATABASE_POOL_PRE_PING` | `database_pool_pre_ping` | Boolean; default `true` |
 
-## Local setup on Windows
+Production settings must identify one explicit non-default database target and
+must not use ambiguous target overrides. SQLAlchemy hides parameter values in
+engine errors and logs. No additional API-prefix setting is supported.
 
-### 1. Clone the repository
+## AirMonitor v2 setup on Windows
 
-```powershell
-git clone https://github.com/YOUR_USERNAME/AirMonitor.git
-cd AirMonitor
-```
+Run these commands from the repository root.
 
-### 2. Create and activate a virtual environment
+### 1. Create the Python environment
+
+AirMonitor v2 supports Python 3.13. The verified development environment uses
+Python 3.13.7.
 
 ```powershell
+cd .\backend
 py -3.13 -m venv .venv
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
-```
-
-### 3. Install Python dependencies
-
-```powershell
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 ```
 
-### 4. Create a local database
+Use `requirements.txt` instead when only runtime dependencies are needed.
+The repository currently has no machine-readable Python-version pin or
+transitive lock file.
+
+### 2. Prepare PostgreSQL
+
+Using an administrator connection outside the application:
+
+1. create a dedicated application role;
+2. create a PostgreSQL database owned by that role;
+3. grant only the privileges required by the application and migrations;
+4. keep the role password and connection URL outside Git.
+
+Do not reuse an integration-test database as an application database.
+
+### 3. Configure the environment
 
 ```powershell
-python init_db.py
+Copy-Item .\.env.example .\.env
 ```
 
-This creates `sensor_data.db` and registers the default device UID expected by the application:
+Edit `.env` locally and set the eight supported variables listed above. At
+minimum, replace the development database configuration with the dedicated
+target prepared for this environment. Treat `.env.example` only as a template.
 
-```text
-airmonitor-main
-```
-
-### 5. Configure local HTTPS files
-
-The current v1.0 backend expects these local files next to `app.py`:
-
-```text
-172.20.10.4+2.pem
-172.20.10.4+2-key.pem
-```
-
-They are intentionally excluded from Git. Use your own local certificate and key, then update the filenames in the `if __name__ == "__main__"` block of `app.py` when necessary.
-
-The printed URL and the firmware server URL are also configured for the original iPhone hotspot network. Update them when your server uses another local IP address.
-
-### 6. Run the backend
+### 4. Apply migrations
 
 ```powershell
-python app.py
+python -B -m alembic -c alembic.ini upgrade head
 ```
 
-The Flask development server listens on all local interfaces on port `5000`.
+The expected head is `a4f9c2e7d1b6`.
 
-## Firmware setup
-
-### 1. Create the local credentials file
-
-Copy the public template:
+### 5. Start the API
 
 ```powershell
-Copy-Item .\secrets.example.h .\secrets.h
+python -B -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Edit `secrets.h`:
+Development-only reload can be enabled with Uvicorn's `--reload` option. Do
+not use reload mode as a production deployment strategy.
 
-```cpp
-#pragma once
+### 6. Verify health
 
-const char* WIFI_SSID = "YOUR_WIFI_NAME";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
 ```
 
-`secrets.h` is ignored by Git and must never be committed.
+The response contains `status`, `service`, and `version`. Health is a liveness
+check; it does not prove database readiness.
 
-### 2. Update the backend address
+## Tests and verification
 
-In `test1_final.ino`, update:
+Run tests from `backend/`. Every pytest invocation must disable bytecode cache
+effects and pytest's cache provider.
 
-```cpp
-const char* serverURL = "https://YOUR_SERVER_IP:5000/update";
+Focused offline checks:
+
+```powershell
+python -B -m pytest -q -p no:cacheprovider tests/test_health.py tests/test_api_openapi.py
 ```
 
-The laptop, phone or browser, and M5Stack device must be connected to the same network.
+Complete offline suite:
 
-### 3. Install Arduino libraries
-
-Install the libraries used by the sketch:
-
-- M5Stack
-- ArduinoJson
-- Adafruit SHT31 Library
-- Plantower PMS7003-compatible library
-
-Then select the appropriate M5Stack / ESP32 board and upload the sketch.
-
-## Measurement workflow
-
-1. Start the Flask server.
-2. Open the dashboard from a browser on the same local network.
-3. Allow browser geolocation access.
-4. Start a measurement session from the dashboard.
-5. The ESP32 begins receiving successful responses from `/update` and uploads a packet every 5 seconds.
-6. The dashboard refreshes live data, location state, charts, and map information through the API.
-7. Stop the session when the measurement at the current control point is complete.
-8. Move to another point and start a new session.
-
-When no session is active, `/update` returns HTTP `409`, and the firmware displays `WAIT START`.
-
-## Data processing
-
-- Invalid negative particle values are rejected.
-- Humidity is validated within `0–100%`.
-- Temperature is validated within `-40–85 °C`.
-- Coordinates are checked against valid latitude and longitude ranges.
-- Session summaries include averages, minimum and maximum PM2.5 values, coordinates, sample count, and AQI.
-- Chart PM2.5 values use a five-point moving average.
-- The short-term forecast uses a simple linear trend over recent session values.
-- NowCast uses a simplified weighted calculation based on recent hourly PM2.5 averages.
-
-## Security and privacy
-
-- Wi-Fi credentials are stored only in `secrets.h`, which is excluded from Git.
-- TLS private keys and certificates are excluded through `.gitignore`.
-- The local SQLite database is excluded because it may contain geolocation history.
-- A public repository should contain only `secrets.example.h`, never `secrets.h`.
-
-### Important v1.0 security limitation
-
-The firmware currently calls:
-
-```cpp
-client.setInsecure();
+```powershell
+python -B -m pytest -q -p no:cacheprovider
 ```
 
-This disables TLS certificate verification. HTTPS encryption is used, but the device does not verify the server identity. This is acceptable only for a controlled local demonstration network and must be replaced with certificate validation before production use.
+Dependency consistency:
 
-## Known limitations
+```powershell
+python -B -m pip check
+```
 
-- The Flask development server is not intended for production deployment.
-- The local server IP and certificate filenames are hard-coded.
-- The firmware currently supports one configured server and one device UID.
-- SQLite is suitable for a local prototype but limits concurrent and distributed deployment.
-- The frontend keeps HTML, CSS, and JavaScript in one large template.
-- Browser geolocation is required before sensor packets are accepted.
-- AQI, NowCast, and short-term forecast values are analytical approximations, not regulatory monitoring results.
-- The dashboard depends on external CDN resources for Bootstrap, Font Awesome, Chart.js, and Leaflet.
+The offline suite skips live PostgreSQL modules unless their dedicated opt-ins
+are supplied.
 
-## Planned AirMonitor v2.0
+### Live integration safety
 
-- FastAPI backend
-- PostgreSQL
-- SQLAlchemy ORM
-- Alembic migrations
-- Structured project modules
-- Environment-based configuration
-- Docker and Docker Compose
-- Logging and error handling
-- Pytest test suite
-- GitHub Actions CI
-- External CSS and JavaScript files
-- Safer certificate handling
-- Improved device configuration
+Live integration is explicit opt-in only and must use dedicated, disposable
+local PostgreSQL databases. Never point these suites at the protected
+application or development database.
 
-Future v3.0 ideas include MQTT, Redis, Celery, WebSockets, Prometheus, Grafana, OAuth, Nginx, and Kubernetes after the v2.0 foundation is complete.
+| Suite | Activation | Required database-name prefix |
+|---|---|---|
+| Persistence | Set `AIRMONITOR_RUN_PERSISTENCE_INTEGRATION=1` and securely provide `AIRMONITOR_TEST_DATABASE_URL` | `airmonitor_persistence_test_` |
+| API | Securely provide `AIRMONITOR_API_TEST_DATABASE_URL` | `airmonitor_api_test_` |
+
+Both guards allow only the `postgresql+asyncpg` driver and hosts `localhost`
+or `127.0.0.1`. Target-changing query parameters and unapproved database names
+are rejected before engine construction.
+
+After the variables are configured through a secure local mechanism, run only
+the intended module:
+
+```powershell
+python -B -m pytest -q -p no:cacheprovider tests/test_persistence_integration.py
+python -B -m pytest -q -p no:cacheprovider tests/test_api_integration.py
+```
+
+Each activated suite:
+
+1. validates the target;
+2. verifies the expected schema and Alembic revision;
+3. truncates all application tables before the suite;
+4. uses `RESTART IDENTITY`;
+5. verifies the initial application tables are empty;
+6. truncates all application tables again during final cleanup;
+7. disposes the engine.
+
+The reset deliberately does not use `CASCADE`, create or drop a database, or
+create or drop a schema. The completed live verification is recorded in
+`docs/reviews/sprint-8-c4b-live-verification.md`.
+
+## Error and validation contract
+
+v2 errors use:
+
+```json
+{
+  "error": {
+    "code": "request_validation_error",
+    "message": "Request validation failed.",
+    "details": null
+  }
+}
+```
+
+The concrete code and message vary by failure, but the `ErrorResponse` shape
+is stable. Validation failures return safe `422` responses, domain conflicts
+return safe `409` responses, missing resources return safe `404` responses,
+and unexpected errors return a generic `500` response when debug mode is
+disabled.
+
+All public identifiers mapped to PostgreSQL `INTEGER` must be greater than
+zero and no greater than `2,147,483,647`. Particle counters are non-negative
+and have the same maximum.
+
+## Deployment and feature limitations
+
+AirMonitor v2 currently has **no authentication or authorization**. Public
+internet exposure is not approved. Use it only on a private or otherwise
+trusted network until a dedicated authentication, authorization, and
+rate-limiting phase is complete.
+
+The following are not implemented v2 capabilities:
+
+- Docker or Docker Compose deployment;
+- CI/CD;
+- Redis, Celery, MQTT, or WebSockets;
+- v2 aggregation, AQI, NowCast, or forecast APIs;
+- telemetry/session history endpoints;
+- map clustering, CSV export, or retention automation;
+- a v2 browser dashboard.
+
+Some of these capabilities exist in the preserved v1 application. That does
+not make them part of the v2 API contract.
+
+## Git and secret safety
+
+- Do not commit `.env`; use `.env.example` only as a template.
+- Do not commit passwords, database URLs, database dumps, or SQLite data.
+- Do not commit certificates, private keys, firmware credentials, or
+  `secrets.h`.
+- Keep legacy root assets unchanged unless a task explicitly targets v1.
+- Do not use live integration variables in ordinary offline test runs.
+
+## Documentation status
+
+- `docs/reviews/sprint-8-full-codebase-audit.md` records the original audit.
+- `docs/reviews/sprint-8-final-verification.md` records the pre-C4 closure
+  state.
+- `docs/reviews/sprint-8-c4b-live-verification.md` records the completed
+  disposable PostgreSQL verification.
+- `docs/specs/telemetry-read-api.md` defines the future read API contract
+  without claiming it is implemented.
 
 ## License
 
-This project is available under the MIT License. See `LICENSE` for details.
-
-## Author
-
-**Nazar Telmanov**  
-System Engineering diploma project  
-Almaty, Kazakhstan
+AirMonitor is available under the MIT License. See `LICENSE`.
