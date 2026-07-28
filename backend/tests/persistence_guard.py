@@ -40,8 +40,7 @@ async def run_persistence_preflight_safely(
         return
 
     failure = pytest.fail.Exception(
-        "Persistence integration database preflight failed. "
-        "Verify local PostgreSQL availability.",
+        "Persistence integration database preflight failed.",
         pytrace=False,
     )
     raise failure from None

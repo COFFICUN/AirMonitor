@@ -43,6 +43,7 @@ del _DATABASE_URL_TEXT
 
 
 from app.core.config import Settings
+from app.db.base import Base
 from app.db.dependencies import get_db_session
 from app.db.models import (
     Device,
@@ -51,6 +52,7 @@ from app.db.models import (
     RawMeasurement,
 )
 from app.main import create_application
+from tests.integration_database_reset import reset_application_tables
 
 
 pytestmark = pytest.mark.anyio
@@ -63,12 +65,7 @@ EXPECTED_TABLES = {
     "raw_measurements",
 }
 EXPECTED_ALEMBIC_HEAD = "a4f9c2e7d1b6"
-DOMAIN_MODELS = (
-    Device,
-    DeviceRuntimeState,
-    MeasurementSession,
-    RawMeasurement,
-)
+RESET_FAILURE_MESSAGE = "API integration database reset failed."
 
 
 @pytest.fixture(scope="session")
@@ -86,9 +83,8 @@ async def _preflight_disposable_database(engine: AsyncEngine) -> None:
                 )
             )
             if table_names != EXPECTED_TABLES:
-                pytest.fail(
-                    "API integration database schema is not approved",
-                    pytrace=False,
+                raise RuntimeError(
+                    "API schema inventory is not approved"
                 )
 
             alembic_heads = (
@@ -97,21 +93,31 @@ async def _preflight_disposable_database(engine: AsyncEngine) -> None:
                 )
             ).scalars().all()
             if alembic_heads != [EXPECTED_ALEMBIC_HEAD]:
-                pytest.fail(
-                    "API integration database revision is not approved",
-                    pytrace=False,
+                raise RuntimeError(
+                    "API schema revision is not approved"
                 )
 
+
+
+async def _verify_application_tables_empty(
+    engine: AsyncEngine,
+) -> None:
+    tables = tuple(Base.metadata.tables.values())
+    if not tables:
+        raise RuntimeError("application metadata has no tables")
+
+    async with engine.connect() as connection:
+        async with connection.begin():
+            await connection.execute(text("SET TRANSACTION READ ONLY"))
             row_counts = [
                 await connection.scalar(
-                    select(func.count()).select_from(model)
+                    select(func.count()).select_from(table)
                 )
-                for model in DOMAIN_MODELS
+                for table in tables
             ]
             if any(row_count != 0 for row_count in row_counts):
-                pytest.fail(
-                    "API integration database is not empty",
-                    pytrace=False,
+                raise RuntimeError(
+                    "API application tables are not empty"
                 )
 
 
@@ -138,10 +144,34 @@ async def session_factory(
     )
     try:
         await run_api_preflight_safely(
-            _parsed_database_url.database,
             lambda: _preflight_disposable_database(engine),
         )
-        yield factory
+        await reset_application_tables(
+            engine,
+            Base.metadata,
+            RESET_FAILURE_MESSAGE,
+        )
+        await run_api_preflight_safely(
+            lambda: _verify_application_tables_empty(engine)
+        )
+
+        # Exit the handler before cleanup so a reset failure cannot retain
+        # the suite error as its exception context.
+        suite_error: BaseException | None = None
+        try:
+            yield factory
+        except BaseException as error:
+            suite_error = error
+
+        await reset_application_tables(
+            engine,
+            Base.metadata,
+            RESET_FAILURE_MESSAGE,
+        )
+        if suite_error is not None:
+            raise suite_error.with_traceback(
+                suite_error.__traceback__
+            ) from None
     finally:
         await engine.dispose()
 

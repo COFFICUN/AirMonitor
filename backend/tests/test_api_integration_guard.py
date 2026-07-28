@@ -105,7 +105,6 @@ def test_unavailable_database_failure_never_exposes_connection_secrets() -> None
     with pytest.raises(pytest.fail.Exception) as raised:
         asyncio.run(
             run_api_preflight_safely(
-                database_name,
                 failing_preflight,
             )
         )
@@ -118,12 +117,12 @@ def test_unavailable_database_failure_never_exposes_connection_secrets() -> None
     assert failure.__context__ is None
     assert failure.__suppress_context__ is True
     assert len(failure_message) < 180
-    assert database_name in failure_message
-    assert "unavailable" in failure_message
+    assert failure_message == "API integration database preflight failed."
     for secret in (
         database_url,
         username,
         password,
+        database_name,
         connection_parameters,
         "OperationalError",
         "RuntimeError",

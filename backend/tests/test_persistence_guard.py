@@ -313,8 +313,7 @@ def test_persistence_preflight_failure_is_sanitized_without_exception_chaining(
     assert failure.__context__ is None
     assert failure.__suppress_context__ is True
     assert failure_message == (
-        "Persistence integration database preflight failed. "
-        "Verify local PostgreSQL availability."
+        "Persistence integration database preflight failed."
     )
     for secret in (
         database_url,

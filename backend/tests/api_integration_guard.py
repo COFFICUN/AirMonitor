@@ -30,7 +30,6 @@ class ApiIntegrationTargetError(ValueError):
 
 
 async def run_api_preflight_safely(
-    database_name: str,
     preflight: Callable[[], Awaitable[None]],
 ) -> None:
     """Fail without retaining secret-bearing connection exceptions."""
@@ -42,9 +41,7 @@ async def run_api_preflight_safely(
         return
 
     failure = pytest.fail.Exception(
-        "Disposable API test database "
-        f"{database_name!r} is unavailable. "
-        "Verify local PostgreSQL availability.",
+        "API integration database preflight failed.",
         pytrace=False,
     )
     raise failure from None
