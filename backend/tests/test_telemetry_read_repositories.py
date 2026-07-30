@@ -10,7 +10,11 @@ import pytest
 from sqlalchemy import and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select, operators
-from sqlalchemy.sql.elements import BooleanClauseList, ClauseElement
+from sqlalchemy.sql.elements import (
+    BooleanClauseList,
+    ClauseElement,
+    Grouping,
+)
 
 from app.db.models import MeasurementSession, RawMeasurement
 from app.repositories.measurement import RawMeasurementRepository
@@ -94,12 +98,21 @@ def _where_terms(statement: Select[Any]) -> tuple[ClauseElement, ...]:
     return (whereclause,)
 
 
+def _ungroup(
+    clause: ClauseElement,
+) -> ClauseElement:
+    while isinstance(clause, Grouping):
+        clause = clause.element
+    return clause
+
+
 def _assert_has_predicate(
     statement: Select[Any],
     expected: ClauseElement,
 ) -> None:
+    normalized_expected = _ungroup(expected)
     assert any(
-        candidate.compare(expected)
+        _ungroup(candidate).compare(normalized_expected)
         for candidate in _where_terms(statement)
     )
 

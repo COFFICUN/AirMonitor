@@ -1,11 +1,17 @@
 """Persistence operations for immutable raw measurements."""
 
-from datetime import datetime
+from __future__ import annotations
 
-from sqlalchemy import func, select
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import RawMeasurement
+
+if TYPE_CHECKING:
+    from app.services.telemetry_cursor import CursorPosition
 
 
 class RawMeasurementRepository:
@@ -36,6 +42,48 @@ class RawMeasurementRepository:
         )
         result = await self._session.execute(statement)
         return result.scalar_one()
+
+    async def list_for_device(
+        self,
+        *,
+        device_id: int,
+        session_id: int | None,
+        measured_from: datetime | None,
+        measured_to: datetime | None,
+        position: CursorPosition | None,
+        limit: int,
+    ) -> list[RawMeasurement]:
+        statement = select(RawMeasurement).where(
+            RawMeasurement.device_id == device_id
+        )
+        if session_id is not None:
+            statement = statement.where(
+                RawMeasurement.session_id == session_id
+            )
+        if measured_from is not None:
+            statement = statement.where(
+                RawMeasurement.measured_at >= measured_from
+            )
+        if measured_to is not None:
+            statement = statement.where(
+                RawMeasurement.measured_at < measured_to
+            )
+        if position is not None:
+            statement = statement.where(
+                or_(
+                    RawMeasurement.measured_at < position.timestamp,
+                    and_(
+                        RawMeasurement.measured_at == position.timestamp,
+                        RawMeasurement.id < position.identifier,
+                    ),
+                )
+            )
+        statement = statement.order_by(
+            RawMeasurement.measured_at.desc(),
+            RawMeasurement.id.desc(),
+        ).limit(limit + 1)
+        result = await self._session.execute(statement)
+        return result.scalars().all()
 
     async def create(
         self,
