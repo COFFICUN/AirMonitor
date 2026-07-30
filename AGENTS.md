@@ -21,367 +21,379 @@ Read completely:
 - docs/reviews/telemetry-read-api-source-audit.md
 - docs/plans/telemetry-read-api-implementation-plan.md
 - backend/app/services/telemetry_cursor.py
+- backend/app/services/telemetry.py
 - backend/app/schemas/telemetry.py
 - backend/app/api/query_validation.py
+- backend/app/repositories/measurement.py
+- backend/app/repositories/measurement_session.py
+- backend/tests/test_telemetry_cursor.py
+- backend/tests/test_telemetry_query_validation.py
 - backend/tests/test_telemetry_read_repositories.py
 - backend/tests/test_telemetry_read_services.py
-- current repository and query-service implementations
-- current DeviceNotFoundError usage
 
-The two C1 test files are approved and must not be weakened.
+Inspect existing schema, dependency-provider, route, OpenAPI, error, and
+architecture test conventions before editing.
 
 ## Current task
 
-Telemetry Read API — Phase C2.
+Telemetry Read API — Phase D1.
 
-Implement only:
+This is an intentionally RED public API and OpenAPI contract checkpoint.
 
-- bounded read methods in the two existing telemetry repositories;
-- immutable telemetry page values;
-- session and measurement telemetry query services.
+Modify only:
 
-Do not implement routes, response schemas, router registration, ORM changes,
-indexes, migrations, integration tests, authentication, aggregation, AQI, or
-frontend work.
+- backend/tests/test_api_schemas.py
+- backend/tests/test_api_routes.py
+- backend/tests/test_api_openapi.py
+- backend/tests/test_api_dependencies.py
+- backend/tests/test_api_architecture.py
 
-## Allowed production changes
+Do not modify production code.
 
-Modify:
+Do not create new test files.
 
-- backend/app/repositories/measurement_session.py
-- backend/app/repositories/measurement.py
+Stop for manual external review after the RED checkpoint.
 
-Create:
+## Future public response schemas
 
-- backend/app/services/telemetry.py
+The future module remains:
 
-Do not modify the C1 tests.
+backend/app/schemas/telemetry.py
 
-Do not modify other production or test files.
+Approved future response symbols:
 
-## Approved repository interfaces
+- SessionListResponse
+- MeasurementListResponse
 
-MeasurementSessionRepository:
+SessionListResponse exact fields:
 
-async def list_for_device(
-    self,
-    *,
-    device_id: int,
-    status: str | None,
-    started_from: datetime | None,
-    started_to: datetime | None,
-    position: CursorPosition | None,
-    limit: int,
-) -> list[MeasurementSession]:
-    ...
+- items: list[SessionResponse]
+- next_cursor: str | None
 
-RawMeasurementRepository:
+MeasurementListResponse exact fields:
 
-async def list_for_device(
-    self,
-    *,
-    device_id: int,
-    session_id: int | None,
-    measured_from: datetime | None,
-    measured_to: datetime | None,
-    position: CursorPosition | None,
-    limit: int,
-) -> list[RawMeasurement]:
-    ...
+- items: list[MeasurementResponse]
+- next_cursor: str | None
 
-## Repository dependency direction
+Reuse the existing concrete item schemas:
 
-Repository modules must not import app.services.telemetry_cursor at runtime.
+- app.schemas.sessions.SessionResponse
+- app.schemas.measurements.MeasurementResponse
 
-Because CursorPosition belongs to the current approved contract, use:
+Do not create competing session or measurement item schemas.
 
-- from __future__ import annotations;
-- TYPE_CHECKING;
-- a type-only CursorPosition import;
+Do not add:
 
-or an equivalent approach that creates no runtime repository-to-service
-dependency.
+- total;
+- page;
+- offset;
+- has_more;
+- count;
+- internal IDs beyond fields already present in the existing item schemas;
+- metadata dictionaries.
 
-Do not move CursorPosition in this phase.
+The response envelope contains exactly:
 
-## Session repository SQL contract
+{
+  "items": [...],
+  "next_cursor": null
+}
 
-Start with:
+or:
 
-MeasurementSession.device_id == device_id
+{
+  "items": [...],
+  "next_cursor": "<opaque cursor>"
+}
 
-Optional predicates:
+## Exact session item fields
 
-- status equality;
-- started_at >= started_from;
-- started_at < started_to;
-- exclusive cursor:
+The existing SessionResponse fields remain authoritative:
 
-  started_at < position.timestamp
-  OR (
-      started_at == position.timestamp
-      AND id < position.identifier
-  )
+- id
+- device_id
+- status
+- started_at
+- ended_at
+- latitude
+- longitude
+- sample_count
+- created_at
 
-Ordering:
+Do not add or remove item fields.
 
-- started_at DESC;
-- id DESC.
+## Exact measurement item fields
 
-SQL limit:
+The existing MeasurementResponse fields remain authoritative:
 
-- limit + 1.
+- id
+- device_id
+- session_id
+- source_message_id
+- measured_at
+- received_at
+- temperature
+- humidity
+- pm1
+- pm25
+- pm10
+- pc0_3
+- pc0_5
+- pc1_0
+- pc2_5
+- pc5_0
+- pc10
+- latitude
+- longitude
+- is_valid
+- validation_note
+- created_at
 
-Do not use OFFSET.
+Do not add or remove item fields.
 
-Return:
+## Future service providers
 
-result.scalars().all()
+Future provider symbols in backend/app/api/dependencies.py:
 
-Preserve database/result ordering and entity identity.
+- get_session_telemetry_query_service
+- get_measurement_telemetry_query_service
 
-## Measurement repository SQL contract
+Each provider:
 
-Always include:
+- receives the existing request-scoped AsyncSession dependency;
+- constructs the matching query service;
+- passes that exact session object to the service;
+- creates no additional session;
+- performs no query or transaction work.
 
-RawMeasurement.device_id == device_id
+## Exact routes
 
-When session_id is supplied, retain both:
+Future routes:
+
+GET /api/v1/devices/{device_id}/sessions
 
-- device_id equality;
-- session_id equality.
+Operation ID:
 
-Optional predicates:
+list_device_sessions
 
-- measured_at >= measured_from;
-- measured_at < measured_to;
-- exclusive cursor:
+GET /api/v1/devices/{device_id}/measurements
 
-  measured_at < position.timestamp
-  OR (
-      measured_at == position.timestamp
-      AND id < position.identifier
-  )
+Operation ID:
 
-Ordering:
+list_device_measurements
 
-- measured_at DESC;
-- id DESC.
+Both return HTTP 200.
 
-SQL limit:
+Both document exactly:
 
-- limit + 1.
+- 200
+- 404
+- 422
+- 500
 
-Do not use OFFSET.
+Existing common framework responses may be represented through the current
+project response helpers, but no extra domain status such as 409 is introduced
+for these reads.
 
-Return:
+## Session route behavior
 
-result.scalars().all()
+The future session GET operation:
 
-## Repository transaction boundary
+- uses the existing bounded positive PostgreSQL INTEGER device_id path;
+- applies strict_session_query_parameters as a decorator dependency;
+- depends on resolve_session_read_request;
+- depends on get_session_telemetry_query_service;
+- awaits exactly one list_sessions(read_request=...) call;
+- converts service ORM items through SessionResponse;
+- returns SessionListResponse;
+- preserves page order;
+- returns page.next_cursor unchanged.
 
-Repositories must not:
+Approved query parameters:
 
-- begin;
-- commit;
-- rollback;
-- flush;
-- delete;
-- mutate entities;
-- use SELECT FOR UPDATE.
+- status
+- started_from
+- started_to
+- limit
+- cursor
 
-They perform one read-only session.execute() call.
+## Measurement route behavior
 
-## Approved service module
+The future measurement GET operation:
 
-Create:
+- uses the existing bounded positive PostgreSQL INTEGER device_id path;
+- applies strict_measurement_query_parameters as a decorator dependency;
+- depends on resolve_measurement_read_request;
+- depends on get_measurement_telemetry_query_service;
+- awaits exactly one list_measurements(read_request=...) call;
+- converts service ORM items through MeasurementResponse;
+- returns MeasurementListResponse;
+- preserves page order;
+- returns page.next_cursor unchanged.
 
-backend/app/services/telemetry.py
+Approved query parameters:
 
-## Approved page type
+- session_id
+- measured_from
+- measured_to
+- limit
+- cursor
 
-PageItem = TypeVar("PageItem")
+## HTTP behavior to lock in tests
 
-@dataclass(frozen=True)
-class TelemetryPage(Generic[PageItem]):
-    items: tuple[PageItem, ...]
-    next_cursor: str | None
+Tests must cover:
 
-Do not replace tuple with list.
+- both GET paths return 200;
+- exact response envelope;
+- exact public item fields;
+- JSON datetime and numeric serialization;
+- default limit forwarding;
+- explicit limit forwarding;
+- all approved filters forwarding;
+- next_cursor forwarding;
+- empty list behavior;
+- safe unknown-device 404;
+- malformed path/query/cursor safe 422;
+- generic failure safe 500;
+- unknown query parameter never calls service;
+- repeated query parameter never calls service;
+- repeated identical query parameter never calls service;
+- equal from/to reaches the service so device existence remains enforceable;
+- service receives the exact resolved read_request;
+- service is awaited exactly once;
+- no mutation or transaction method is called.
 
-## Approved service interfaces
+For measurements:
 
-class SessionTelemetryQueryService:
-    def __init__(self, session: AsyncSession) -> None:
-        ...
+- a valid nonexistent session_id produces an empty 200 page;
+- a valid session_id belonging to another device also produces an empty 200
+  page;
+- the endpoint must not reveal whether the session exists or who owns it.
 
-    async def list_sessions(
-        self,
-        *,
-        read_request: SessionReadRequest,
-    ) -> TelemetryPage[MeasurementSession]:
-        ...
+This behavior is implemented by normal device-scoped repository filtering, not
+by a separate session ownership error.
 
-class MeasurementTelemetryQueryService:
-    def __init__(self, session: AsyncSession) -> None:
-        ...
+## Route compatibility
 
-    async def list_measurements(
-        self,
-        *,
-        read_request: MeasurementReadRequest,
-    ) -> TelemetryPage[RawMeasurement]:
-        ...
+The existing static route:
 
-## Required repository attributes
+GET /api/v1/devices/{device_id}/sessions/active
 
-Follow current query-service conventions and expose:
+must remain unchanged and reachable.
 
-SessionTelemetryQueryService:
+The new collection route must not collide with it.
 
-- device_repository
-- session_repository
+Do not change the existing nine operation contracts.
 
-MeasurementTelemetryQueryService:
+## OpenAPI contract
 
-- device_repository
-- measurement_repository
+After future implementation OpenAPI must contain:
 
-Construct all repositories from the same AsyncSession supplied to the service
-constructor.
+- version 3.1.0;
+- 11 total operations;
+- 10 under /api/v1;
+- 1 under /health;
+- 11 unique operation IDs.
 
-Do not add constructor dependency-injection parameters.
+New operation IDs are exactly:
 
-## Device existence behavior
+- list_device_sessions
+- list_device_measurements
 
-For every service call:
+Success responses must reference concrete list envelope schemas.
 
-1. call device_repository.get_by_id(device_id);
-2. if it returns None, raise the existing DeviceNotFoundError using the
-   established constructor convention;
-3. only then consider empty-range or telemetry-list behavior.
+OpenAPI tests must verify:
 
-Do not query telemetry rows for an unknown device.
+- both GET paths;
+- exact operation IDs;
+- 200/404/422/500 documented responses;
+- query parameter names;
+- query parameter types;
+- limit default 100;
+- limit minimum 1;
+- limit maximum 500;
+- cursor maximum length 2048;
+- status enum active/completed/cancelled;
+- device_id PostgreSQL INTEGER maximum;
+- session_id PostgreSQL INTEGER maximum;
+- timestamps represented as date-time values.
 
-## Equal-range behavior
+Capture and compare the existing nine operation contracts before adding new
+assertions. They must remain structurally equivalent.
 
-For:
+Do not use fragile whole-document snapshotting when targeted structural
+comparison is sufficient.
 
-from == to
+## Architecture tests
 
-after device existence succeeds:
+Add assertions proving future routes:
 
-- return TelemetryPage(items=(), next_cursor=None);
-- do not call the telemetry repository.
+- do not import repositories;
+- do not import SQLAlchemy statement builders;
+- do not call select, where, order_by, limit, offset, begin, commit, rollback,
+  flush, or delete;
+- do not instantiate AsyncSession;
+- depend on service providers;
+- use concrete response models, not dict or Any.
 
-This applies independently to:
+Retain existing architecture policies.
 
-- started_from == started_to;
-- measured_from == measured_to.
+## Test implementation boundary
 
-## Normal read behavior
+API tests must override the future service providers.
 
-Forward the exact normalized read request values to the repository:
+They must not:
 
-Sessions:
+- instantiate a real database session;
+- contact PostgreSQL;
+- read database URLs;
+- activate integration suites;
+- duplicate query-service behavior;
+- duplicate cursor encoding;
+- modify global environment values without exact restoration;
+- rely on route implementation internals beyond the public dependency
+  contract.
 
-- device_id;
-- status;
-- started_from;
-- started_to;
-- position;
-- public limit.
+Use production cursor helpers when a valid cursor is required.
 
-Measurements:
+## Expected RED boundary
 
-- device_id;
-- session_id;
-- measured_from;
-- measured_to;
-- position;
-- public limit.
+Existing tests must remain green.
 
-The repository, not the service, applies SQL limit + 1.
+New assertions may fail only because the approved future symbols and GET
+operations do not exist yet:
 
-## Page construction
+- SessionListResponse;
+- MeasurementListResponse;
+- get_session_telemetry_query_service;
+- get_measurement_telemetry_query_service;
+- GET session list route;
+- GET measurement list route.
 
-Let public_limit = read_request.limit.
+No syntax failure, unrelated import failure, PostgreSQL access, or existing
+contract regression is acceptable.
 
-For repository rows of length 0 through public_limit:
+Do not use:
 
-- return all rows as a tuple;
-- preserve order and identity;
-- next_cursor is None.
+- conditional imports;
+- fallback implementations;
+- skips;
+- xfail;
+- importlib workarounds.
 
-For repository rows of length public_limit + 1:
+## Baseline
 
-- return tuple(rows[:public_limit]);
-- do not return the extra row;
-- use rows[public_limit - 1] as the cursor source;
-- never use rows[public_limit].
+Before editing:
 
-Session cursor position:
+- full offline suite: 782 passed, 2 skipped;
+- OpenAPI 3.1.0;
+- 9 operations;
+- 8 /api/v1 operations;
+- 1 /health operation;
+- 9 unique operation IDs;
+- Alembic head a4f9c2e7d1b6.
 
-CursorPosition(
-    final_returned_session.started_at,
-    final_returned_session.id,
-)
-
-Measurement cursor position:
-
-CursorPosition(
-    final_returned_measurement.measured_at,
-    final_returned_measurement.id,
-)
-
-Generate next_cursor with production encode_cursor and the original
-read_request.filters.
-
-Do not duplicate cursor encoding.
-
-## Error behavior
-
-Do not broadly catch repository or cursor exceptions.
-
-Repository failures must propagate.
-
-CursorValidationError from next-cursor generation must propagate.
-
-Do not convert failures into an empty page or fake success.
-
-## Service transaction boundary
-
-Services in this phase must not:
-
-- begin;
-- commit;
-- rollback;
-- flush;
-- mutate Device;
-- mutate MeasurementSession;
-- mutate RawMeasurement;
-- import FastAPI;
-- construct HTTP Response objects;
-- contain SQL.
-
-## Scope exclusions
-
-Do not modify:
-
-- API routes;
-- response schemas;
-- query validation;
-- cursor code;
-- ORM models;
-- Alembic;
-- indexes;
-- settings;
-- dependencies;
-- README;
-- legacy files;
-- approved C1 tests.
-
-## Verification environment
+## Verification
 
 Use only:
 
@@ -393,65 +405,60 @@ Every pytest command must include:
 
 Do not connect to PostgreSQL.
 
-Do not activate live integration tests.
+Before editing run:
 
-## Required incremental verification
+- full offline suite;
+- API schema tests;
+- API route tests;
+- OpenAPI tests;
+- dependency tests;
+- architecture tests;
+- pip check;
+- git diff --check.
 
-1. run the approved C1 tests and record initial RED;
-2. implement repository methods only;
-3. run repository C1 tests;
-4. implement telemetry service only;
-5. run service C1 tests;
-6. run both C1 files;
-7. run telemetry cursor and query-validation tests;
-8. run existing repository/query-service/service tests;
-9. run the full offline backend suite;
-10. run OpenAPI tests;
-11. run pip check;
-12. run git diff --check;
-13. run scope/import/secret/local-path scans.
+After editing run:
 
-Expected final results:
-
-- C1 focused: 51 passed;
-- full offline suite: 781 passed, 2 skipped;
-- OpenAPI 3.1.0;
-- nine operations;
-- eight /api/v1 operations;
-- one /health operation;
-- nine unique operation IDs;
-- Alembic head remains a4f9c2e7d1b6.
-
-## Architecture checks
-
-Verify:
-
-- repository modules do not import FastAPI;
-- repository modules have no runtime import from app.services;
-- app.services.telemetry contains no SQLAlchemy select/where/order building;
-- no commit, rollback, flush, begin, delete, or entity assignment was added;
-- no broad exception handler was added;
-- no database URL, credential, environment read, or local user path was added.
+- all five modified API test files;
+- classify every intentional RED failure;
+- prove existing assertions remain green;
+- run the existing suite excluding only newly added telemetry assertions when
+  technically necessary;
+- run pip check;
+- run git diff --check;
+- run syntax parsing;
+- run scope scan;
+- run secret and local-path scans.
 
 ## Git restrictions
 
-Do not stage, commit, push, reset, clean, stash, create branches, or modify Git
-configuration.
+Do not:
+
+- stage;
+- commit;
+- push;
+- reset;
+- clean;
+- stash;
+- create or delete branches;
+- modify Git configuration.
 
 Read-only Git commands are allowed.
 
 ## Definition of done
 
-Phase C2 is complete only when:
+Phase D1 is complete only when:
 
-- exactly three approved production files changed;
-- approved C1 tests remain unchanged;
-- repository tests pass;
-- service tests pass;
-- full offline suite passes;
-- OpenAPI remains unchanged;
-- no PostgreSQL access occurs;
-- no transaction or mutation behavior is introduced;
-- Git index remains unchanged;
+- exactly the five approved test files changed;
+- no production file changed;
+- schema envelope contracts are covered;
+- dependency providers are covered;
+- both route contracts are covered;
+- unknown/repeated parameters are proven to avoid service calls;
+- equal ranges are proven to reach the service;
+- existing active-session route remains compatible;
+- existing nine OpenAPI contracts remain unchanged;
+- future OpenAPI inventory is fixed at eleven operations;
+- focused failures concern only approved missing production boundaries;
+- no PostgreSQL or Git write occurs;
 - work stops for manual external review.
 '@ | Set-Content -Path ".\AGENTS.md" -Encoding UTF8
