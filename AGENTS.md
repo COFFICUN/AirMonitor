@@ -3,17 +3,8 @@
 
 ## Repository context
 
-AirMonitor v1 is the stable legacy implementation stored at the repository
-root.
-
-Legacy assets are read-only unless the user explicitly requests changes:
-
-- root app.py;
-- root sensor_data.db;
-- legacy frontend files;
-- firmware and Arduino files;
-- certificates, keys, credentials, and environment files;
-- legacy Flask and SQLite files.
+AirMonitor v1 at the repository root is stable legacy reference material and
+must not be modified.
 
 AirMonitor v2 lives under backend/ and uses FastAPI, PostgreSQL, async
 SQLAlchemy, Alembic, Pydantic, and pytest.
@@ -29,47 +20,67 @@ Read completely:
 - docs/specs/telemetry-read-api.md
 - docs/reviews/telemetry-read-api-source-audit.md
 - docs/plans/telemetry-read-api-implementation-plan.md
+- backend/tests/test_telemetry_cursor.py
+- backend/tests/test_telemetry_query_validation.py
 
-The specification is the approved product contract.
-
-The source audit defines the approved architecture and index strategy.
-
-The implementation plan defines the approved test-first sequence.
-
-Do not silently change approved decisions.
+The two telemetry test files are the approved Phase B1 contract.
 
 ## Current task
 
-Telemetry Read API — Phase B1.
+Telemetry Read API — Phase B2.
 
-This is an intentionally RED contract-test checkpoint.
+Implement only:
 
-Create only:
+- cursor v1 primitives;
+- normalized telemetry read filters and request values;
+- strict raw query validation;
+- typed telemetry query models;
+- pure request resolvers.
+
+Do not implement routes, repositories, read services, ORM changes, indexes, or
+Alembic migrations.
+
+## Required pre-implementation RED addition
+
+Before creating production code, add a parameterized test proving that cursor
+positions exactly equal to the normalized lower time bound are accepted for:
+
+- sessions;
+- measurements.
+
+This locks half-open range behavior:
+
+[from, to)
+
+The lower bound is inclusive and the upper bound is exclusive.
+
+Run the focused test and record the intentional missing-production-module RED
+before implementation.
+
+## Allowed production files
+
+Create:
+
+- backend/app/services/telemetry_cursor.py
+- backend/app/schemas/telemetry.py
+- backend/app/api/query_validation.py
+
+Modify only when required by current export conventions:
+
+- backend/app/services/__init__.py
+- backend/app/schemas/__init__.py
+- backend/app/schemas/_base.py
+
+Allowed tests:
 
 - backend/tests/test_telemetry_cursor.py
 - backend/tests/test_telemetry_query_validation.py
 
-Do not create or modify production code.
+Do not modify other files.
 
-Do not implement:
+## Approved public symbols
 
-- cursor codec;
-- query models;
-- query dependencies;
-- routes;
-- repositories;
-- services;
-- ORM models;
-- Alembic migrations;
-- indexes;
-- settings;
-- dependencies.
-
-Stop after the failing tests are written and externally reviewed.
-
-## Cursor v1 contract to lock with tests
-
-Future production symbols:
+From app.services.telemetry_cursor:
 
 - CursorResource
 - CursorPosition
@@ -83,21 +94,46 @@ Future production symbols:
 - encode_cursor
 - decode_cursor
 
-Expected production module:
+From app.schemas.telemetry:
 
-backend/app/services/telemetry_cursor.py
+- SessionListQuery
+- MeasurementListQuery
 
-Exact cursor payload keys:
+From app.api.query_validation:
 
-- f: normalized-filter fingerprint;
-- p: last timestamp and identifier;
-- r: resource kind;
-- v: version 1.
+- strict_session_query_parameters
+- strict_measurement_query_parameters
+- resolve_session_read_request
+- resolve_measurement_read_request
 
-Semantic payload:
+## Cursor value structure
+
+CursorPosition fields, in order:
+
+- timestamp
+- identifier
+
+SessionReadRequest and MeasurementReadRequest fields, in order:
+
+- filters
+- limit
+- position
+
+Use immutable plain values such as frozen dataclasses where appropriate.
+
+## Cursor payload
+
+Exact keys:
+
+- f
+- p
+- r
+- v
+
+Exact semantic structure:
 
 {
-  "f": "<sha256 fingerprint>",
+  "f": "<filter fingerprint>",
   "p": ["2026-07-30T00:00:00.000000Z", 1],
   "r": "sessions",
   "v": 1
@@ -109,128 +145,120 @@ unpadded-base64url(UTF-8(canonical compact JSON))
 
 Canonical JSON:
 
-- sort_keys=True;
-- separators=(",", ":");
-- ensure_ascii=False;
-- allow_nan=False.
+- sort_keys=True
+- separators=(",", ":")
+- ensure_ascii=False
+- allow_nan=False
 
 Limits:
 
-- encoded cursor maximum 2,048 ASCII characters;
-- decoded cursor maximum 1,024 bytes;
+- encoded cursor <= 2,048 ASCII characters;
+- decoded payload <= 1,024 bytes;
 - identifier range 1..2,147,483,647.
 
-Timestamp format:
+Exact timestamp format:
 
 YYYY-MM-DDTHH:MM:SS.ffffffZ
 
-Filter fingerprint:
+## Fingerprint clarification
 
-- SHA-256;
-- deterministic normalized filter document;
-- includes resource kind;
-- includes device_id;
-- includes resource-specific filters;
+The B1 known vectors are authoritative.
+
+Session default filter document:
+
+{"device_id":7,"started_from":null,"started_to":null,"status":null}
+
+Expected fingerprint:
+
+Fyo9RltXgZFinDACG7SKuXhr-Q32CVEDDYbC8Cqwsxc
+
+Measurement default filter document:
+
+{"device_id":7,"measured_from":null,"measured_to":null,"session_id":null}
+
+Expected fingerprint:
+
+ARdRoG52q4S4U3swx-AGuessvtbNE602TFCaubU_aMA
+
+Fingerprint:
+
+- SHA-256 of canonical normalized filter JSON;
+- Base64url without padding;
 - excludes limit;
-- excludes cursor;
-- contains no credentials or authorization information.
+- excludes cursor position;
+- contains no credentials or authorization state.
 
-Cursor implementation must eventually be pure and standard-library only.
+The resource kind is bound separately through the exact payload field r and
+must be validated independently.
 
-## Required cursor tests
+Do not add the resource field inside the fingerprint document because that
+would violate the approved known vectors.
 
-Lock at minimum:
+## Cursor decoder
 
-- sessions encode/decode round trip;
-- measurements encode/decode round trip;
-- deterministic encoding;
-- canonical compact JSON;
-- lexicographically sorted payload keys;
-- UTF-8;
-- URL-safe Base64 alphabet;
-- absence of Base64 padding;
-- exact canonical UTC timestamp;
-- encoded size boundary;
-- decoded size boundary;
-- supported resource kinds;
-- identifier minimum and maximum;
-- fingerprint excludes limit;
-- fingerprint excludes cursor;
-- fingerprint changes when device_id changes;
-- fingerprint changes when status changes;
-- fingerprint changes when session_id changes;
-- fingerprint changes when time filters change;
-- duplicate JSON key rejection;
-- unknown payload field rejection;
-- missing payload field rejection;
-- malformed Base64 rejection;
-- padded Base64 rejection;
-- non-ASCII cursor rejection;
-- impossible Base64 length rejection;
-- invalid UTF-8 rejection;
-- malformed JSON rejection;
-- trailing JSON rejection;
-- NaN rejection;
-- Infinity rejection;
-- noncanonical JSON rejection;
-- unsupported version rejection;
-- Boolean version rejection;
-- wrong resource-kind rejection;
-- invalid position shape rejection;
-- invalid timestamp rejection;
-- noncanonical timestamp rejection;
-- naive timestamp rejection;
-- non-UTC timestamp rejection;
-- invalid calendar timestamp rejection;
-- Boolean identifier rejection;
-- zero identifier rejection;
-- negative identifier rejection;
-- float identifier rejection;
-- string identifier rejection;
-- identifier above PostgreSQL INTEGER maximum rejection;
-- malformed fingerprint rejection;
-- fingerprint mismatch rejection;
-- cursor position outside normalized time bounds rejection;
-- cursor rejection for equal empty time range;
-- cursor payload contains no credentials;
-- cursor payload contains no database URL;
-- cursor payload contains no token;
-- cursor payload contains no settings;
-- cursor payload contains no authorization state.
+Validate in a fail-closed sequence:
 
-Tests must not contain a second implementation of:
+1. exact input type;
+2. ASCII;
+3. encoded-size limit;
+4. no padding;
+5. Base64url alphabet and possible length;
+6. strict Base64 decoding;
+7. decoded-size limit;
+8. strict UTF-8;
+9. JSON object only;
+10. duplicate-member rejection;
+11. NaN and Infinity rejection;
+12. exact fields f, p, r, v;
+13. canonical reserialization equality;
+14. exact integer version 1, excluding Boolean;
+15. exact supported string resource;
+16. expected-resource match;
+17. exact two-member position array;
+18. canonical UTC timestamp;
+19. exact bounded integer identifier, excluding Boolean;
+20. fingerprint shape;
+21. fingerprint equality;
+22. normalized time-bound compatibility.
 
-- cursor encoding;
-- cursor decoding;
-- fingerprint generation;
-- timestamp normalization;
-- canonical serialization.
+All failures must raise one sanitized CursorValidationError.
 
-Tests may decode cursor wire bytes only for exact protocol assertions.
+Do not expose:
 
-## Query validation contract
+- raw cursor;
+- payload;
+- fingerprint;
+- parser error;
+- query values;
+- credentials.
 
-Future query models:
+## Purity boundary
 
-- SessionListQuery
-- MeasurementListQuery
+app.services.telemetry_cursor may use only standard-library facilities for:
 
-Expected module:
+- base64;
+- json;
+- hashlib;
+- datetime;
+- dataclasses;
+- enums/literals;
+- typing.
 
-backend/app/schemas/telemetry.py
+It must not import:
 
-Future raw query boundary:
+- FastAPI;
+- Starlette;
+- Pydantic;
+- SQLAlchemy;
+- AsyncSession;
+- ORM models;
+- settings;
+- database modules;
+- authentication state.
 
-- strict_session_query_parameters
-- strict_measurement_query_parameters
-- resolve_session_read_request
-- resolve_measurement_read_request
+## Query models
 
-Expected module:
-
-backend/app/api/query_validation.py
-
-Session query keys:
+SessionListQuery:
 
 - status
 - started_from
@@ -238,7 +266,7 @@ Session query keys:
 - limit
 - cursor
 
-Measurement query keys:
+MeasurementListQuery:
 
 - session_id
 - measured_from
@@ -246,182 +274,150 @@ Measurement query keys:
 - limit
 - cursor
 
-The raw dependency must eventually inspect:
+Requirements:
+
+- extra="forbid";
+- limit default 100;
+- limit range 1..500;
+- cursor length <= 2,048;
+- session_id range 1..2,147,483,647;
+- status exactly active, completed, or cancelled;
+- reject naive timestamps;
+- normalize aware timestamps to UTC;
+- accept from < to;
+- accept from == to;
+- reject from > to.
+
+Reuse or add a shared bounded PostgreSQL INTEGER annotation in
+app.schemas._base without changing existing field behavior.
+
+## Strict raw query dependencies
+
+Inspect:
 
 request.query_params.multi_items()
 
-It must reject:
+Use separate allowlists.
 
-- every unknown query key;
-- every supported scalar key repeated more than once;
-- repeated identical values;
-- raw query values in error messages.
+Sessions:
 
-Pydantic query models must use:
+- status
+- started_from
+- started_to
+- limit
+- cursor
 
-extra="forbid"
+Measurements:
 
-## Required query tests
+- session_id
+- measured_from
+- measured_to
+- limit
+- cursor
 
-Lock at minimum:
+Reject:
 
-- exact session allowlist;
-- exact measurement allowlist;
-- unknown session parameter rejected;
-- unknown measurement parameter rejected;
-- repeated supported scalar rejected;
-- repeated identical scalar rejected;
-- default limit 100;
-- limit 1 accepted;
-- limit 500 accepted;
-- limit 0 rejected;
-- limit 501 rejected;
-- bounded positive session_id;
-- session_id zero rejected;
-- session_id above 2,147,483,647 rejected;
-- active status accepted;
-- completed status accepted;
-- cancelled status accepted;
-- invalid status rejected;
-- case-changed status rejected;
-- aware timestamps accepted;
-- naive timestamps rejected;
-- equivalent timezone offsets normalized consistently;
-- from less than to accepted;
-- from equal to to accepted;
-- from greater than to rejected;
-- cursor/filter mismatch rejected;
-- safe 422 flow;
-- validation performs no database access;
-- validation performs no session access;
-- validation performs no service access;
-- validation performs no repository access;
-- validation errors expose no raw query values;
-- validation errors expose no cursor payload.
+- unknown keys;
+- cross-endpoint keys;
+- any repeated supported scalar;
+- repeated identical values.
 
-## Phase B1 test quality requirements
+Common keys limit and cursor are accepted for both resources.
 
-Tests must:
+Raw validation performs no database, service, repository, session, or settings
+access.
 
-- be black-box contract tests;
-- have meaningful names;
-- avoid external dependencies;
-- avoid PostgreSQL;
-- avoid environment-value reads;
-- avoid duplicated production logic;
-- follow current pytest conventions;
-- use shared fixtures only when they already exist;
-- not weaken assertions to simplify future implementation.
+## Resolvers
 
-If an existing fixture must be modified, report the requirement and stop.
-Do not modify it automatically.
+Resolvers:
 
-## Required workflow
+- receive bounded device_id;
+- receive the typed query model;
+- normalize filters;
+- decode cursor when present;
+- return SessionReadRequest or MeasurementReadRequest;
+- keep limit outside the fingerprint;
+- map cursor failures into the existing sanitized HTTP 422 flow;
+- perform no database work.
 
-Before editing:
+Use existing RequestValidationError handling conventions.
 
-1. report repository root;
-2. report worktree path;
-3. report detached HEAD and base commit;
-4. report exact Git status;
-5. list every loaded AGENTS.md;
-6. list selected skills and order;
-7. run the current offline baseline;
-8. run pip check;
-9. inspect current schema, error, and test conventions;
-10. report the planned test structure;
-11. explain how production logic will not be duplicated;
-12. report the expected missing-symbol RED boundary.
+Do not manually return an HTTP response.
 
-After editing:
+## Scope exclusions
 
-1. run both new test files;
-2. confirm failures are only missing approved production symbols;
-3. run all existing tests while excluding both new files;
-4. run pip check;
-5. run git diff --check;
-6. verify exactly two new files exist;
-7. scan for credentials, database URLs, local paths, and secrets;
-8. report test count and line count;
-9. report final Git status and diff stat;
-10. stop for manual review.
+Do not modify or implement:
 
-## Test commands
+- API routes;
+- router registration;
+- repositories;
+- telemetry query services;
+- response-list schemas;
+- ORM models;
+- Alembic;
+- indexes;
+- requirements;
+- settings;
+- integration tests;
+- README;
+- approved documents;
+- legacy files.
+
+## Verification
 
 Use only:
 
 C:\Users\nazar\Desktop\AirMonitor\backend\.venv\Scripts\python.exe
 
-Every pytest command must include:
+Every pytest invocation must include:
 
 -B -p no:cacheprovider
 
-Do not activate live integration tests.
-
 Do not connect to PostgreSQL.
 
-Do not read or print ambient database URL values.
+Do not activate live integration tests.
 
-Expected existing baseline:
+Run:
 
-- 550 passed;
-- 2 skipped;
-- OpenAPI 3.1.0;
-- nine unique operations;
+1. the new lower-bound RED test before implementation;
+2. both telemetry focused files;
+3. existing API schema and API error tests;
+4. full offline backend suite;
+5. pip check;
+6. guarded OpenAPI tests;
+7. git diff --check;
+8. import-boundary scan;
+9. scope scan;
+10. secret and local-path scan.
+
+Expected OpenAPI remains:
+
+- 3.1.0;
+- nine operations;
 - eight under /api/v1;
 - one /health;
-- one Alembic head: a4f9c2e7d1b6.
-
-## Allowed changes
-
-Only:
-
-- backend/tests/test_telemetry_cursor.py
-- backend/tests/test_telemetry_query_validation.py
-
-## Forbidden changes
-
-Do not modify:
-
-- AGENTS.md after the scope commit;
-- backend/app;
-- existing tests;
-- backend/alembic;
-- requirements;
-- settings;
-- README;
-- approved specifications, audits, or plans;
-- legacy files;
-- Agent Skills;
-- Git configuration.
+- nine unique operation IDs.
 
 ## Git restrictions
 
-Do not:
-
-- stage;
-- commit;
-- push;
-- create or delete branches;
-- reset;
-- clean;
-- stash;
-- modify Git configuration.
+Do not stage, commit, push, create branches, reset, clean, stash, or modify Git
+configuration.
 
 Read-only Git commands are allowed.
 
 ## Definition of done
 
-Phase B1 is complete only when:
+Phase B2 is complete only when:
 
-- exactly two new test files exist;
-- no production file changed;
-- approved contracts are comprehensively covered;
-- tests do not duplicate production implementation;
-- focused tests are intentionally RED only because approved symbols do not
-  exist;
-- existing offline tests remain green;
-- no database or secret access occurs;
-- Git index remains unchanged;
+- the lower-bound contract was added before implementation;
+- all telemetry cursor tests pass;
+- all telemetry query-validation tests pass;
+- existing API schema/error tests pass;
+- full offline suite passes;
+- OpenAPI remains unchanged;
+- no route, repository, ORM, migration, or dependency change occurs;
+- cursor module remains pure;
+- no database access occurs;
+- final output reports changed files and exact Git status;
 - work stops for manual external review.
 '@ | Set-Content -Path ".\AGENTS.md" -Encoding UTF8
