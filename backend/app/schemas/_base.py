@@ -15,6 +15,10 @@ def require_timezone(value: datetime) -> datetime:
 
 AwareDatetime = Annotated[datetime, AfterValidator(require_timezone)]
 POSTGRES_INTEGER_MAX = 2_147_483_647
+PositivePostgresInteger = Annotated[
+    int,
+    Field(gt=0, le=POSTGRES_INTEGER_MAX),
+]
 NonNegativePostgresInteger = Annotated[
     int,
     Field(ge=0, le=POSTGRES_INTEGER_MAX),
@@ -38,5 +42,6 @@ __all__ = [
     "NonNegativePostgresInteger",
     "ORMResponseModel",
     "POSTGRES_INTEGER_MAX",
+    "PositivePostgresInteger",
     "RequestModel",
 ]
