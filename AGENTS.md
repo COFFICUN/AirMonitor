@@ -9,359 +9,327 @@ must not be modified.
 AirMonitor v2 lives under backend/ and uses FastAPI, PostgreSQL, async
 SQLAlchemy, Alembic, Pydantic, and pytest.
 
-Current branch:
+Current feature branch:
 
 feature/telemetry-read-api
 
-## Governing documents
+## Governing documents and contracts
 
 Read completely:
 
 - docs/specs/telemetry-read-api.md
 - docs/reviews/telemetry-read-api-source-audit.md
 - docs/plans/telemetry-read-api-implementation-plan.md
-- backend/tests/test_telemetry_cursor.py
-- backend/tests/test_telemetry_query_validation.py
-
-The two telemetry test files are the approved Phase B1 contract.
-
-## Current task
-
-Telemetry Read API — Phase B2.
-
-Implement only:
-
-- cursor v1 primitives;
-- normalized telemetry read filters and request values;
-- strict raw query validation;
-- typed telemetry query models;
-- pure request resolvers.
-
-Do not implement routes, repositories, read services, ORM changes, indexes, or
-Alembic migrations.
-
-## Required pre-implementation RED addition
-
-Before creating production code, add a parameterized test proving that cursor
-positions exactly equal to the normalized lower time bound are accepted for:
-
-- sessions;
-- measurements.
-
-This locks half-open range behavior:
-
-[from, to)
-
-The lower bound is inclusive and the upper bound is exclusive.
-
-Run the focused test and record the intentional missing-production-module RED
-before implementation.
-
-## Allowed production files
-
-Create:
-
 - backend/app/services/telemetry_cursor.py
 - backend/app/schemas/telemetry.py
 - backend/app/api/query_validation.py
-
-Modify only when required by current export conventions:
-
-- backend/app/services/__init__.py
-- backend/app/schemas/__init__.py
-- backend/app/schemas/_base.py
-
-Allowed tests:
-
 - backend/tests/test_telemetry_cursor.py
 - backend/tests/test_telemetry_query_validation.py
 
-Do not modify other files.
+Inspect existing repository, service, schema, error, and test conventions before
+defining any new symbol.
 
-## Approved public symbols
+The approved specification and implementation plan remain authoritative.
 
-From app.services.telemetry_cursor:
+## Current task
 
-- CursorResource
-- CursorPosition
-- CursorValidationError
-- SessionReadFilters
-- MeasurementReadFilters
-- SessionReadRequest
-- MeasurementReadRequest
-- normalize_session_filters
-- normalize_measurement_filters
-- encode_cursor
-- decode_cursor
+Telemetry Read API — Phase C1.
 
-From app.schemas.telemetry:
+This is an intentionally RED repository and service contract checkpoint.
 
-- SessionListQuery
-- MeasurementListQuery
+Create only:
 
-From app.api.query_validation:
+- backend/tests/test_telemetry_read_repositories.py
+- backend/tests/test_telemetry_read_services.py
 
-- strict_session_query_parameters
-- strict_measurement_query_parameters
-- resolve_session_read_request
-- resolve_measurement_read_request
+Do not modify production code.
 
-## Cursor value structure
+Do not implement:
 
-CursorPosition fields, in order:
-
-- timestamp
-- identifier
-
-SessionReadRequest and MeasurementReadRequest fields, in order:
-
-- filters
-- limit
-- position
-
-Use immutable plain values such as frozen dataclasses where appropriate.
-
-## Cursor payload
-
-Exact keys:
-
-- f
-- p
-- r
-- v
-
-Exact semantic structure:
-
-{
-  "f": "<filter fingerprint>",
-  "p": ["2026-07-30T00:00:00.000000Z", 1],
-  "r": "sessions",
-  "v": 1
-}
-
-Wire format:
-
-unpadded-base64url(UTF-8(canonical compact JSON))
-
-Canonical JSON:
-
-- sort_keys=True
-- separators=(",", ":")
-- ensure_ascii=False
-- allow_nan=False
-
-Limits:
-
-- encoded cursor <= 2,048 ASCII characters;
-- decoded payload <= 1,024 bytes;
-- identifier range 1..2,147,483,647.
-
-Exact timestamp format:
-
-YYYY-MM-DDTHH:MM:SS.ffffffZ
-
-## Fingerprint clarification
-
-The B1 known vectors are authoritative.
-
-Session default filter document:
-
-{"device_id":7,"started_from":null,"started_to":null,"status":null}
-
-Expected fingerprint:
-
-Fyo9RltXgZFinDACG7SKuXhr-Q32CVEDDYbC8Cqwsxc
-
-Measurement default filter document:
-
-{"device_id":7,"measured_from":null,"measured_to":null,"session_id":null}
-
-Expected fingerprint:
-
-ARdRoG52q4S4U3swx-AGuessvtbNE602TFCaubU_aMA
-
-Fingerprint:
-
-- SHA-256 of canonical normalized filter JSON;
-- Base64url without padding;
-- excludes limit;
-- excludes cursor position;
-- contains no credentials or authorization state.
-
-The resource kind is bound separately through the exact payload field r and
-must be validated independently.
-
-Do not add the resource field inside the fingerprint document because that
-would violate the approved known vectors.
-
-## Cursor decoder
-
-Validate in a fail-closed sequence:
-
-1. exact input type;
-2. ASCII;
-3. encoded-size limit;
-4. no padding;
-5. Base64url alphabet and possible length;
-6. strict Base64 decoding;
-7. decoded-size limit;
-8. strict UTF-8;
-9. JSON object only;
-10. duplicate-member rejection;
-11. NaN and Infinity rejection;
-12. exact fields f, p, r, v;
-13. canonical reserialization equality;
-14. exact integer version 1, excluding Boolean;
-15. exact supported string resource;
-16. expected-resource match;
-17. exact two-member position array;
-18. canonical UTC timestamp;
-19. exact bounded integer identifier, excluding Boolean;
-20. fingerprint shape;
-21. fingerprint equality;
-22. normalized time-bound compatibility.
-
-All failures must raise one sanitized CursorValidationError.
-
-Do not expose:
-
-- raw cursor;
-- payload;
-- fingerprint;
-- parser error;
-- query values;
-- credentials.
-
-## Purity boundary
-
-app.services.telemetry_cursor may use only standard-library facilities for:
-
-- base64;
-- json;
-- hashlib;
-- datetime;
-- dataclasses;
-- enums/literals;
-- typing.
-
-It must not import:
-
-- FastAPI;
-- Starlette;
-- Pydantic;
-- SQLAlchemy;
-- AsyncSession;
-- ORM models;
-- settings;
-- database modules;
-- authentication state.
-
-## Query models
-
-SessionListQuery:
-
-- status
-- started_from
-- started_to
-- limit
-- cursor
-
-MeasurementListQuery:
-
-- session_id
-- measured_from
-- measured_to
-- limit
-- cursor
-
-Requirements:
-
-- extra="forbid";
-- limit default 100;
-- limit range 1..500;
-- cursor length <= 2,048;
-- session_id range 1..2,147,483,647;
-- status exactly active, completed, or cancelled;
-- reject naive timestamps;
-- normalize aware timestamps to UTC;
-- accept from < to;
-- accept from == to;
-- reject from > to.
-
-Reuse or add a shared bounded PostgreSQL INTEGER annotation in
-app.schemas._base without changing existing field behavior.
-
-## Strict raw query dependencies
-
-Inspect:
-
-request.query_params.multi_items()
-
-Use separate allowlists.
-
-Sessions:
-
-- status
-- started_from
-- started_to
-- limit
-- cursor
-
-Measurements:
-
-- session_id
-- measured_from
-- measured_to
-- limit
-- cursor
-
-Reject:
-
-- unknown keys;
-- cross-endpoint keys;
-- any repeated supported scalar;
-- repeated identical values.
-
-Common keys limit and cursor are accepted for both resources.
-
-Raw validation performs no database, service, repository, session, or settings
-access.
-
-## Resolvers
-
-Resolvers:
-
-- receive bounded device_id;
-- receive the typed query model;
-- normalize filters;
-- decode cursor when present;
-- return SessionReadRequest or MeasurementReadRequest;
-- keep limit outside the fingerprint;
-- map cursor failures into the existing sanitized HTTP 422 flow;
-- perform no database work.
-
-Use existing RequestValidationError handling conventions.
-
-Do not manually return an HTTP response.
-
-## Scope exclusions
-
-Do not modify or implement:
-
-- API routes;
-- router registration;
 - repositories;
-- telemetry query services;
-- response-list schemas;
+- query services;
+- API routes;
+- routers;
+- response schemas;
 - ORM models;
-- Alembic;
 - indexes;
-- requirements;
+- Alembic revisions;
 - settings;
-- integration tests;
-- README;
-- approved documents;
-- legacy files.
+- dependencies;
+- integration tests.
+
+Stop for manual external review after the RED checkpoint.
+
+## Source-driven symbol rule
+
+Before editing, inspect the approved implementation plan and current source.
+
+Report the exact future:
+
+- repository module paths;
+- repository function or method names;
+- service module paths;
+- service function or method names;
+- page/result value types;
+- existing device-not-found exception type;
+- existing AsyncSession ownership convention.
+
+Do not invent competing names when the plan or current architecture already
+defines them.
+
+If the approved plan is genuinely ambiguous about a required public symbol,
+report the ambiguity and stop before writing tests.
+
+## Repository responsibility
+
+Repository code in the future phase will perform read-only SQLAlchemy queries.
+
+It must not:
+
+- perform HTTP work;
+- import FastAPI;
+- encode or decode cursors;
+- construct HTTP responses;
+- own request validation;
+- commit;
+- rollback;
+- flush;
+- mutate ORM entities;
+- update last_seen_at;
+- update sample_count;
+- change session status;
+- change device runtime state.
+
+The caller owns transaction/session lifecycle.
+
+## Session repository contract
+
+The future session-list query must support:
+
+- required device_id equality;
+- optional exact status;
+- optional inclusive started_from;
+- optional exclusive started_to;
+- optional exclusive keyset cursor;
+- stable ordering by started_at DESC, id DESC;
+- fetching exactly limit + 1 rows.
+
+Required cursor continuation semantics:
+
+started_at < cursor_timestamp
+OR (
+    started_at = cursor_timestamp
+    AND id < cursor_identifier
+)
+
+The repository must not:
+
+- use OFFSET;
+- order only by started_at;
+- omit the id tie-breaker;
+- perform device existence decisions;
+- trim the extra row;
+- create next_cursor.
+
+## Measurement repository contract
+
+The future measurement-list query must support:
+
+- required device_id equality;
+- optional session_id equality;
+- optional inclusive measured_from;
+- optional exclusive measured_to;
+- optional exclusive keyset cursor;
+- stable ordering by measured_at DESC, id DESC;
+- fetching exactly limit + 1 rows.
+
+Required cursor continuation semantics:
+
+measured_at < cursor_timestamp
+OR (
+    measured_at = cursor_timestamp
+    AND id < cursor_identifier
+)
+
+The repository must retain both predicates when session_id is supplied:
+
+device_id = ?
+AND session_id = ?
+
+The repository must not:
+
+- use OFFSET;
+- omit device_id when session_id is present;
+- order only by measured_at;
+- omit the id tie-breaker;
+- trim the extra row;
+- encode next_cursor.
+
+## Repository RED tests
+
+Tests must cover at minimum:
+
+### Sessions
+
+- device predicate is always present;
+- status predicate is optional and exact;
+- started_from is inclusive;
+- started_to is exclusive;
+- both range predicates compose;
+- cursor predicate is exclusive;
+- equal timestamps use id as the tie-breaker;
+- ordering is started_at DESC, id DESC;
+- requested SQL limit is public limit + 1;
+- no OFFSET;
+- rows are returned in repository order;
+- no commit, rollback, flush, or mutation occurs.
+
+### Measurements
+
+- device predicate is always present;
+- session_id predicate is optional;
+- device_id remains present with session_id;
+- measured_from is inclusive;
+- measured_to is exclusive;
+- cursor predicate is exclusive;
+- equal timestamps use id as the tie-breaker;
+- ordering is measured_at DESC, id DESC;
+- requested SQL limit is public limit + 1;
+- no OFFSET;
+- no commit, rollback, flush, or mutation occurs.
+
+Follow current repository-test conventions.
+
+Do not assert one entire dialect-specific SQL string when semantic statement
+inspection is sufficient.
+
+Do not create a fake second repository implementation inside tests.
+
+## Service responsibility
+
+The future service layer will orchestrate:
+
+- device existence verification;
+- empty-range handling;
+- repository invocation;
+- limit + 1 page trimming;
+- has-more detection;
+- next_cursor generation;
+- immutable page/result construction.
+
+Service code must not:
+
+- contain SQL;
+- depend on FastAPI;
+- construct Response or JSONResponse;
+- manage database commits;
+- mutate persistence state.
+
+## Device existence ordering
+
+Device existence must be established before returning an empty page.
+
+For from == to:
+
+1. check that the device exists;
+2. return an empty page for an existing device;
+3. raise the existing safe device-not-found domain exception for an unknown
+   device;
+4. do not execute the telemetry list repository query.
+
+## Service pagination contract
+
+Given repository rows:
+
+- zero through limit rows:
+  - return all rows;
+  - next_cursor is None;
+
+- limit + 1 rows:
+  - return only the first limit rows;
+  - next_cursor is generated from the final returned row;
+  - the extra row is not returned;
+  - the extra row is not used as the cursor position.
+
+Session cursor position uses:
+
+- started_at;
+- id.
+
+Measurement cursor position uses:
+
+- measured_at;
+- id.
+
+The service must preserve repository ordering.
+
+## Service RED tests
+
+Tests must cover at minimum:
+
+- unknown device uses the current domain not-found exception;
+- existing device with no rows returns empty page;
+- equal range checks device existence first;
+- equal range skips telemetry repository query;
+- equal range for unknown device does not return an empty success;
+- repository receives normalized filters and cursor position;
+- repository receives public limit and applies the established limit + 1
+  boundary according to current architecture;
+- zero rows returns null cursor;
+- exactly limit rows returns null cursor;
+- limit + 1 rows returns only limit items;
+- next_cursor is generated from the final returned item;
+- extra row is not returned;
+- extra row is not used for cursor generation;
+- session page uses started_at and id;
+- measurement page uses measured_at and id;
+- filters are bound into generated cursor;
+- service does not commit, rollback, flush, or mutate data;
+- repository exceptions are not broadly swallowed;
+- cursor encoder failures are not converted into fake success.
+
+Use the approved cursor production functions instead of reproducing cursor
+encoding inside service tests.
+
+## Test-quality requirements
+
+Tests must:
+
+- be black-box contracts;
+- follow current async pytest conventions;
+- avoid PostgreSQL;
+- avoid environment reads;
+- avoid live integration activation;
+- avoid duplicated SQL/query implementations;
+- avoid duplicated cursor implementation;
+- avoid HTTP route harnesses;
+- use current ORM and response fields exactly;
+- use current exception terminology exactly.
+
+Mocks or fakes may record calls, but they must not recreate the production
+query algorithm.
+
+Do not change an existing fixture automatically.
+
+If an existing shared fixture must change, report and stop.
+
+## Expected RED boundary
+
+Focused tests should fail only because the approved future repository and
+service symbols do not yet exist.
+
+Do not use:
+
+- conditional imports;
+- fallback implementations;
+- skips;
+- xfail;
+- importlib workarounds.
+
+Collection errors for missing approved production modules or symbols are
+expected.
+
+Other failures are not accepted.
 
 ## Verification
 
@@ -375,49 +343,68 @@ Every pytest invocation must include:
 
 Do not connect to PostgreSQL.
 
-Do not activate live integration tests.
+Before editing run:
 
-Run:
+- full offline backend suite;
+- relevant existing repository tests;
+- relevant existing service tests;
+- pip check;
+- git diff --check.
 
-1. the new lower-bound RED test before implementation;
-2. both telemetry focused files;
-3. existing API schema and API error tests;
-4. full offline backend suite;
-5. pip check;
-6. guarded OpenAPI tests;
-7. git diff --check;
-8. import-boundary scan;
-9. scope scan;
-10. secret and local-path scan.
+Expected baseline:
 
-Expected OpenAPI remains:
-
-- 3.1.0;
+- 730 passed;
+- 2 skipped;
+- OpenAPI 3.1.0;
 - nine operations;
-- eight under /api/v1;
-- one /health;
-- nine unique operation IDs.
+- nine unique operation IDs;
+- Alembic head a4f9c2e7d1b6.
+
+After editing run:
+
+- both new focused test files;
+- prove failures are only missing approved production symbols;
+- all existing tests excluding the two new RED files;
+- pip check;
+- git diff --check;
+- syntax and collection verification;
+- scope scan;
+- secret and local-path scan.
+
+## Allowed changes
+
+Only:
+
+- backend/tests/test_telemetry_read_repositories.py
+- backend/tests/test_telemetry_read_services.py
 
 ## Git restrictions
 
-Do not stage, commit, push, create branches, reset, clean, stash, or modify Git
-configuration.
+Do not:
+
+- stage;
+- commit;
+- push;
+- create or delete branches;
+- reset;
+- clean;
+- stash;
+- modify Git configuration.
 
 Read-only Git commands are allowed.
 
 ## Definition of done
 
-Phase B2 is complete only when:
+Phase C1 is complete only when:
 
-- the lower-bound contract was added before implementation;
-- all telemetry cursor tests pass;
-- all telemetry query-validation tests pass;
-- existing API schema/error tests pass;
-- full offline suite passes;
-- OpenAPI remains unchanged;
-- no route, repository, ORM, migration, or dependency change occurs;
-- cursor module remains pure;
-- no database access occurs;
-- final output reports changed files and exact Git status;
+- exactly two new test files exist;
+- no production file changed;
+- repository ordering and keyset contracts are covered;
+- service pagination and empty-range contracts are covered;
+- no cursor or repository implementation is duplicated in tests;
+- focused tests are intentionally RED only for missing production symbols;
+- existing offline suite remains green;
+- no database or secret access occurs;
+- Git index remains unchanged;
 - work stops for manual external review.
 '@ | Set-Content -Path ".\AGENTS.md" -Encoding UTF8
