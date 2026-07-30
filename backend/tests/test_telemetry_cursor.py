@@ -43,6 +43,31 @@ SESSION_FINGERPRINT_VECTOR = (
 MEASUREMENT_FINGERPRINT_VECTOR = (
     "ARdRoG52q4S4U3swx-AGuessvtbNE602TFCaubU_aMA"
 )
+CANONICAL_SESSIONS_CURSOR = (
+    "eyJmIjoiRnlvOVJsdFhnWkZpbkRBQ0c3U0t1WGhyLVEzMkNWRUREWWJDOE"
+    "Nxd3N4YyIsInAiOlsiMjAyNi0wNy0zMFQwMDowMDowMC4wMDAwMDBaIiwx"
+    "XSwiciI6InNlc3Npb25zIiwidiI6MX0"
+)
+NONCANONICAL_BASE64URL_ALIASES = (
+    (
+        "ends-in-MX1",
+        "eyJmIjoiRnlvOVJsdFhnWkZpbkRBQ0c3U0t1WGhyLVEzMkNWRUREWWJDOE"
+        "Nxd3N4YyIsInAiOlsiMjAyNi0wNy0zMFQwMDowMDowMC4wMDAwMDBaIiwx"
+        "XSwiciI6InNlc3Npb25zIiwidiI6MX1",
+    ),
+    (
+        "ends-in-MX2",
+        "eyJmIjoiRnlvOVJsdFhnWkZpbkRBQ0c3U0t1WGhyLVEzMkNWRUREWWJDOE"
+        "Nxd3N4YyIsInAiOlsiMjAyNi0wNy0zMFQwMDowMDowMC4wMDAwMDBaIiwx"
+        "XSwiciI6InNlc3Npb25zIiwidiI6MX2",
+    ),
+    (
+        "ends-in-MX3",
+        "eyJmIjoiRnlvOVJsdFhnWkZpbkRBQ0c3U0t1WGhyLVEzMkNWRUREWWJDOE"
+        "Nxd3N4YyIsInAiOlsiMjAyNi0wNy0zMFQwMDowMDowMC4wMDAwMDBaIiwx"
+        "XSwiciI6InNlc3Npb25zIiwidiI6MX3",
+    ),
+)
 
 INVALID_STRUCTURE_WIRES = (
     (
@@ -575,6 +600,27 @@ def test_malformed_wire_values_are_rejected(wire: str) -> None:
     _assert_cursor_rejected(wire)
 
 
+@pytest.mark.parametrize(
+    "alias",
+    [alias for _, alias in NONCANONICAL_BASE64URL_ALIASES],
+    ids=[case for case, _ in NONCANONICAL_BASE64URL_ALIASES],
+)
+def test_noncanonical_base64url_aliases_are_rejected(alias: str) -> None:
+    assert alias[:-1] == CANONICAL_SESSIONS_CURSOR[:-1]
+    assert alias[-1] != CANONICAL_SESSIONS_CURSOR[-1]
+    assert _protocol_bytes(alias) == _protocol_bytes(
+        CANONICAL_SESSIONS_CURSOR
+    )
+
+    _assert_cursor_operation_rejected(
+        lambda: decode_cursor(
+            alias,
+            SESSION_RESOURCE,
+            _session_filters(),
+        )
+    )
+
+
 def test_padded_base64_is_rejected() -> None:
     valid = encode_cursor(
         SESSION_RESOURCE,
@@ -720,6 +766,40 @@ def test_cursor_fingerprint_must_match_normalized_filters() -> None:
             _session_filters(device_id=8),
         )
     )
+
+
+@pytest.mark.parametrize(
+    ("resource", "filters"),
+    [
+        (
+            SESSION_RESOURCE,
+            _session_filters(
+                started_from=POSITION_TIMESTAMP,
+                started_to=datetime(2026, 7, 31, tzinfo=UTC),
+            ),
+        ),
+        (
+            MEASUREMENT_RESOURCE,
+            _measurement_filters(
+                measured_from=POSITION_TIMESTAMP,
+                measured_to=datetime(2026, 7, 31, tzinfo=UTC),
+            ),
+        ),
+    ],
+    ids=["sessions", "measurements"],
+)
+def test_cursor_position_at_normalized_lower_time_bound_is_accepted(
+    resource: CursorResource,
+    filters: SessionReadFilters | MeasurementReadFilters,
+) -> None:
+    position = CursorPosition(
+        datetime(2026, 7, 30, tzinfo=UTC),
+        1,
+    )
+
+    cursor = encode_cursor(resource, position, filters)
+
+    assert decode_cursor(cursor, resource, filters) == position
 
 
 @pytest.mark.parametrize(
