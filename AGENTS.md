@@ -6,594 +6,363 @@
 AirMonitor v1 is the stable legacy implementation stored at the repository
 root.
 
-The following legacy assets are read-only reference material and must not be
-modified unless the user explicitly requests it:
+Legacy assets are read-only unless the user explicitly requests changes:
 
 - root app.py;
 - root sensor_data.db;
-- legacy HTML, CSS, and JavaScript;
+- legacy frontend files;
 - firmware and Arduino files;
-- certificates, private keys, credentials, and environment files;
-- legacy Flask and SQLite implementation files.
+- certificates, keys, credentials, and environment files;
+- legacy Flask and SQLite files.
 
-AirMonitor v2 lives under backend/ and uses:
+AirMonitor v2 lives under backend/ and uses FastAPI, PostgreSQL, async
+SQLAlchemy, Alembic, Pydantic, and pytest.
 
-- FastAPI;
-- PostgreSQL;
-- SQLAlchemy async engine and sessions;
-- Alembic;
-- Pydantic Settings;
-- pytest.
+Current branch:
 
-The current development branch is based on the completed Sprint 8
-stabilization baseline.
+feature/telemetry-read-api
 
-## Current task
+## Governing documents
 
-Telemetry Read API — Phase A: source audit, index analysis, and implementation
-plan.
+Read completely:
 
-This is a documentation-only planning phase.
-
-The approved product and API contract already exists at:
-
-docs/specs/telemetry-read-api.md
-
-Treat that specification as authoritative unless it directly contradicts
-current production source. Report contradictions instead of silently changing
-the approved contract.
-
-## Approved MVP
-
-Exactly two future endpoints:
-
-- GET /api/v1/devices/{device_id}/sessions
-- GET /api/v1/devices/{device_id}/measurements
-
-Proposed operation IDs:
-
-- list_device_sessions
-- list_device_measurements
-
-Do not add other endpoints to the MVP.
-
-### Session ordering
-
-Stable descending keyset ordering:
-
-started_at DESC, id DESC
-
-Filters:
-
-- status;
-- started_from;
-- started_to;
-- limit;
-- cursor.
-
-### Measurement ordering
-
-Stable descending keyset ordering:
-
-measured_at DESC, id DESC
-
-Filters:
-
-- session_id;
-- measured_from;
-- measured_to;
-- limit;
-- cursor.
-
-### Pagination
-
-- keyset pagination only;
-- no offset pagination;
-- default limit 100;
-- minimum 1;
-- maximum 500;
-- fetch limit + 1 to determine next_cursor;
-- cursor is exclusive;
-- URL-safe;
-- opaque to clients;
-- versioned;
-- filter-bound;
-- must contain no credentials or secrets;
-- malformed, unsupported, mismatched, or semantically invalid cursor produces
-  safe 422.
-
-Required keyset predicates:
-
-For sessions after a cursor position:
-
-started_at < cursor_started_at
-OR (
-    started_at = cursor_started_at
-    AND id < cursor_id
-)
-
-For measurements after a cursor position:
-
-measured_at < cursor_measured_at
-OR (
-    measured_at = cursor_measured_at
-    AND id < cursor_id
-)
-
-### Time ranges
-
-Use half-open UTC ranges:
-
-[from, to)
-
-Approved equality behavior:
-
-- from greater than to is invalid and produces safe 422;
-- from equal to to returns an empty page;
-- device existence must still be established before returning the empty page.
-
-All timestamps must be timezone-aware and normalized consistently with current
-application behavior.
-
-### Response envelope
-
-Both endpoints return:
-
-{
-  "items": [],
-  "next_cursor": null
-}
-
-Use exact current schema and ORM field names.
-
-Do not invent response fields.
-
-### Errors
-
-Document and later preserve:
-
-- 200 success;
-- 404 unknown device;
-- 422 invalid path identifier, query parameter, timestamp, limit, range, or
-  cursor;
-- safe generic 500;
-- current ErrorResponse terminology.
-
-All identifiers mapped to PostgreSQL INTEGER must remain within:
-
-1..2147483647
-
-### Query validation
-
-The future implementation must reject:
-
-- unknown query parameters;
-- repeated scalar query parameters;
-- invalid status values;
-- invalid timestamp ranges;
-- invalid cursor/filter combinations.
-
-Inspect current FastAPI behavior and identify the exact implementation boundary
-needed to enforce this contract.
-
-Do not assume FastAPI rejects unknown query parameters automatically.
-
-### Authorization
-
-The current v2 backend has no authentication or authorization.
-
-The read endpoints inherit the existing trusted-network model.
-
-Do not:
-
-- add authentication during this phase;
-- treat cursor contents as authorization;
-- approve public internet exposure;
-- introduce rate limiting during this phase.
-
-## Phase A scope
-
-Create only:
-
+- docs/specs/telemetry-read-api.md
 - docs/reviews/telemetry-read-api-source-audit.md
 - docs/plans/telemetry-read-api-implementation-plan.md
 
-Do not modify:
+The specification is the approved product contract.
 
-- AGENTS.md after the scope commit;
-- backend application code;
-- backend tests;
-- ORM models;
-- Alembic revisions;
-- requirements;
-- environment templates;
-- README;
-- the approved API specification;
-- legacy files;
-- Agent Skills;
-- Git state.
+The source audit defines the approved architecture and index strategy.
 
-Directories may be created only when needed for the two approved documents.
+The implementation plan defines the approved test-first sequence.
 
-## Required source audit
+Do not silently change approved decisions.
 
-Read the approved specification completely.
+## Current task
 
-Inspect current source for:
+Telemetry Read API — Phase B1.
 
-- API routers;
-- endpoint dependencies;
-- error handling;
-- request validation;
-- response schemas;
-- session schemas;
-- measurement schemas;
-- device schemas;
-- ORM models;
-- repositories;
-- services;
-- transaction ownership;
-- async database lifecycle;
-- existing indexes and constraints;
-- current Alembic migration;
-- OpenAPI tests;
-- service tests;
-- repository tests;
-- API tests;
-- PostgreSQL integration tests;
-- integration guards;
-- existing pagination or encoding utilities;
-- current dependencies.
+This is an intentionally RED contract-test checkpoint.
 
-Generate the OpenAPI schema offline.
+Create only:
 
-Do not connect to PostgreSQL.
+- backend/tests/test_telemetry_cursor.py
+- backend/tests/test_telemetry_query_validation.py
 
-Do not read or print ambient database URL values.
+Do not create or modify production code.
 
-## Index analysis
+Do not implement:
 
-Create an exact inventory of current indexes and relevant constraints for:
-
-- devices;
-- measurement_sessions;
-- raw_measurements.
-
-Map every proposed query pattern to the current index inventory.
-
-Analyze at minimum:
-
-### Sessions
-
-Device filter plus ordering:
-
-device_id = ?
-ORDER BY started_at DESC, id DESC
-
-Optional status:
-
-device_id = ?
-AND status = ?
-ORDER BY started_at DESC, id DESC
-
-Optional time range:
-
-device_id = ?
-AND started_at >= ?
-AND started_at < ?
-ORDER BY started_at DESC, id DESC
-
-Cursor continuation:
-
-device_id = ?
-AND (
-    started_at < ?
-    OR (started_at = ? AND id < ?)
-)
-ORDER BY started_at DESC, id DESC
-
-### Measurements
-
-Device filter plus ordering:
-
-device_id = ?
-ORDER BY measured_at DESC, id DESC
-
-Optional session filter:
-
-device_id = ?
-AND session_id = ?
-ORDER BY measured_at DESC, id DESC
-
-Optional time range:
-
-device_id = ?
-AND measured_at >= ?
-AND measured_at < ?
-ORDER BY measured_at DESC, id DESC
-
-Cursor continuation:
-
-device_id = ?
-AND (
-    measured_at < ?
-    OR (measured_at = ? AND id < ?)
-)
-ORDER BY measured_at DESC, id DESC
-
-Do not claim an index is sufficient only because some indexed columns overlap.
-
-Consider:
-
-- equality column order;
-- ordering column order;
-- descending traversal;
-- tie-breaking id;
-- optional status;
-- optional session_id;
-- foreign-key indexes;
-- write amplification;
-- duplicate or redundant indexes;
-- PostgreSQL btree behavior;
-- migration downgrade safety.
-
-The audit must reach one explicit conclusion:
-
-1. existing indexes are sufficient and no migration is required; or
-2. a reviewed Alembic migration is required.
-
-If a migration is required, propose exact:
-
-- index names;
-- table names;
-- ordered columns;
-- sort directions;
-- optional predicates;
-- upgrade operations;
-- downgrade operations;
-- redundant indexes that should remain or be removed.
-
-Do not create the migration during Phase A.
-
-## Cursor design analysis
-
-Derive an implementation-ready cursor boundary from the approved
-specification.
-
-Document:
-
-- cursor version field;
-- resource kind;
-- last timestamp;
-- last identifier;
-- normalized filter fingerprint;
-- encoding format;
-- URL-safe Base64 behavior;
-- padding policy;
-- canonical JSON rules;
-- maximum decoded and encoded size;
-- integer validation;
-- timestamp validation;
-- resource-kind mismatch;
-- filter mismatch;
-- unsupported version;
-- malformed Base64;
-- malformed JSON;
-- duplicate JSON keys;
-- unknown cursor fields;
-- safe error mapping.
-
-Cursor data must not contain:
-
-- passwords;
-- database URLs;
-- device credentials;
-- access tokens;
-- authorization state.
-
-Do not implement the codec during Phase A.
-
-## Architecture plan
-
-Identify the exact future implementation files and responsibilities.
-
-The plan must cover:
-
-- query parameter schemas or dependencies;
-- strict unknown/repeated query validation;
-- list response schemas;
 - cursor codec;
-- filter normalization;
+- query models;
+- query dependencies;
+- routes;
 - repositories;
 - services;
-- routes;
-- router registration;
-- error mapping;
-- OpenAPI operation IDs;
-- tests;
-- optional Alembic migration.
+- ORM models;
+- Alembic migrations;
+- indexes;
+- settings;
+- dependencies.
 
-Preserve the current dependency direction.
+Stop after the failing tests are written and externally reviewed.
 
-Routes must not contain raw SQL or transaction logic.
+## Cursor v1 contract to lock with tests
 
-Services must not manually encode HTTP responses.
+Future production symbols:
 
-Repositories must not depend on FastAPI.
+- CursorResource
+- CursorPosition
+- CursorValidationError
+- SessionReadFilters
+- MeasurementReadFilters
+- SessionReadRequest
+- MeasurementReadRequest
+- normalize_session_filters
+- normalize_measurement_filters
+- encode_cursor
+- decode_cursor
 
-Cursor code must not depend on SQLAlchemy sessions.
+Expected production module:
 
-Read operations must not mutate:
+backend/app/services/telemetry_cursor.py
 
-- device runtime state;
-- measurement sessions;
-- raw measurements;
-- sample_count;
-- last_seen_at.
+Exact cursor payload keys:
 
-## Test plan
+- f: normalized-filter fingerprint;
+- p: last timestamp and identifier;
+- r: resource kind;
+- v: version 1.
 
-Design failing tests before implementation.
+Semantic payload:
 
-The test plan must include:
+{
+  "f": "<sha256 fingerprint>",
+  "p": ["2026-07-30T00:00:00.000000Z", 1],
+  "r": "sessions",
+  "v": 1
+}
 
-### Schema and validation
+Wire format:
 
-- exact response fields;
-- limit defaults and bounds;
-- PostgreSQL INTEGER boundaries;
-- timezone-aware timestamps;
-- from greater than to;
-- from equal to to;
-- invalid status;
-- unknown query parameter;
-- repeated scalar query parameter.
+unpadded-base64url(UTF-8(canonical compact JSON))
 
-### Cursor codec
+Canonical JSON:
 
-- encode/decode round trip;
-- deterministic canonicalization;
-- URL-safe output;
-- no padding ambiguity;
-- malformed Base64;
-- oversized cursor;
-- malformed JSON;
-- duplicate keys;
-- unknown fields;
-- unsupported version;
-- wrong resource kind;
-- invalid timestamp;
-- invalid identifier;
-- filter fingerprint mismatch.
+- sort_keys=True;
+- separators=(",", ":");
+- ensure_ascii=False;
+- allow_nan=False.
 
-### Repository and service behavior
+Limits:
 
-- stable descending ordering;
-- identical timestamps ordered by id;
-- limit + 1 behavior;
-- correct next_cursor;
-- final page has null cursor;
-- no skipped rows;
-- no duplicate rows;
-- status filtering;
-- session filtering;
-- half-open time filtering;
-- unknown device 404;
-- equal range checks device existence before empty result;
-- read-only behavior;
-- no runtime-state mutation.
+- encoded cursor maximum 2,048 ASCII characters;
+- decoded cursor maximum 1,024 bytes;
+- identifier range 1..2,147,483,647.
 
-### API and OpenAPI
+Timestamp format:
 
-- both paths;
-- both operation IDs;
-- 200 responses;
-- safe 404;
-- safe 422;
-- safe generic 500;
-- response envelope;
-- existing nine operations unchanged;
-- final OpenAPI contains eleven unique operations.
+YYYY-MM-DDTHH:MM:SS.ffffffZ
 
-### PostgreSQL integration
+Filter fingerprint:
 
-Plan live tests for:
+- SHA-256;
+- deterministic normalized filter document;
+- includes resource kind;
+- includes device_id;
+- includes resource-specific filters;
+- excludes limit;
+- excludes cursor;
+- contains no credentials or authorization information.
 
-- real ordering;
-- tie-breaking;
-- cursor continuation;
-- repeated execution on disposable databases;
-- cleanup;
-- identity reset if existing suite contract still applies;
-- any new migration and index existence.
+Cursor implementation must eventually be pure and standard-library only.
 
-Do not activate live tests during Phase A.
+## Required cursor tests
 
-## Required documents
+Lock at minimum:
 
-### Source audit
+- sessions encode/decode round trip;
+- measurements encode/decode round trip;
+- deterministic encoding;
+- canonical compact JSON;
+- lexicographically sorted payload keys;
+- UTF-8;
+- URL-safe Base64 alphabet;
+- absence of Base64 padding;
+- exact canonical UTC timestamp;
+- encoded size boundary;
+- decoded size boundary;
+- supported resource kinds;
+- identifier minimum and maximum;
+- fingerprint excludes limit;
+- fingerprint excludes cursor;
+- fingerprint changes when device_id changes;
+- fingerprint changes when status changes;
+- fingerprint changes when session_id changes;
+- fingerprint changes when time filters change;
+- duplicate JSON key rejection;
+- unknown payload field rejection;
+- missing payload field rejection;
+- malformed Base64 rejection;
+- padded Base64 rejection;
+- non-ASCII cursor rejection;
+- impossible Base64 length rejection;
+- invalid UTF-8 rejection;
+- malformed JSON rejection;
+- trailing JSON rejection;
+- NaN rejection;
+- Infinity rejection;
+- noncanonical JSON rejection;
+- unsupported version rejection;
+- Boolean version rejection;
+- wrong resource-kind rejection;
+- invalid position shape rejection;
+- invalid timestamp rejection;
+- noncanonical timestamp rejection;
+- naive timestamp rejection;
+- non-UTC timestamp rejection;
+- invalid calendar timestamp rejection;
+- Boolean identifier rejection;
+- zero identifier rejection;
+- negative identifier rejection;
+- float identifier rejection;
+- string identifier rejection;
+- identifier above PostgreSQL INTEGER maximum rejection;
+- malformed fingerprint rejection;
+- fingerprint mismatch rejection;
+- cursor position outside normalized time bounds rejection;
+- cursor rejection for equal empty time range;
+- cursor payload contains no credentials;
+- cursor payload contains no database URL;
+- cursor payload contains no token;
+- cursor payload contains no settings;
+- cursor payload contains no authorization state.
 
-Create:
+Tests must not contain a second implementation of:
 
-docs/reviews/telemetry-read-api-source-audit.md
+- cursor encoding;
+- cursor decoding;
+- fingerprint generation;
+- timestamp normalization;
+- canonical serialization.
 
-Include:
+Tests may decode cursor wire bytes only for exact protocol assertions.
 
-- current branch and base commit;
-- current OpenAPI inventory;
-- current relevant source layout;
-- exact ORM fields;
-- exact response fields;
-- current validation conventions;
-- current error conventions;
-- current repository/service boundaries;
-- current index inventory;
-- query-to-index analysis;
-- cursor implementation constraints;
-- contradictions or ambiguities;
-- explicit migration decision;
-- risks and blockers.
+## Query validation contract
 
-### Implementation plan
+Future query models:
 
-Create:
+- SessionListQuery
+- MeasurementListQuery
 
-docs/plans/telemetry-read-api-implementation-plan.md
+Expected module:
 
-Use small reviewable phases.
+backend/app/schemas/telemetry.py
 
-At minimum:
+Future raw query boundary:
 
-1. failing cursor and query validation tests;
-2. cursor and filter primitives;
-3. failing repository/service tests;
-4. repository queries;
-5. service orchestration;
-6. failing API/OpenAPI tests;
-7. routes and schemas;
-8. Alembic migration if required;
-9. offline verification;
-10. live disposable PostgreSQL verification;
-11. documentation update;
-12. review, commit, and merge sequence.
+- strict_session_query_parameters
+- strict_measurement_query_parameters
+- resolve_session_read_request
+- resolve_measurement_read_request
 
-For every phase state:
+Expected module:
 
-- goal;
-- files allowed to change;
-- tests written first;
-- implementation boundary;
-- commands;
-- expected result;
-- rollback or failure condition;
-- proposed commit message.
+backend/app/api/query_validation.py
 
-Do not combine the entire feature into one implementation commit.
+Session query keys:
 
-## Verification
+- status
+- started_from
+- started_to
+- limit
+- cursor
+
+Measurement query keys:
+
+- session_id
+- measured_from
+- measured_to
+- limit
+- cursor
+
+The raw dependency must eventually inspect:
+
+request.query_params.multi_items()
+
+It must reject:
+
+- every unknown query key;
+- every supported scalar key repeated more than once;
+- repeated identical values;
+- raw query values in error messages.
+
+Pydantic query models must use:
+
+extra="forbid"
+
+## Required query tests
+
+Lock at minimum:
+
+- exact session allowlist;
+- exact measurement allowlist;
+- unknown session parameter rejected;
+- unknown measurement parameter rejected;
+- repeated supported scalar rejected;
+- repeated identical scalar rejected;
+- default limit 100;
+- limit 1 accepted;
+- limit 500 accepted;
+- limit 0 rejected;
+- limit 501 rejected;
+- bounded positive session_id;
+- session_id zero rejected;
+- session_id above 2,147,483,647 rejected;
+- active status accepted;
+- completed status accepted;
+- cancelled status accepted;
+- invalid status rejected;
+- case-changed status rejected;
+- aware timestamps accepted;
+- naive timestamps rejected;
+- equivalent timezone offsets normalized consistently;
+- from less than to accepted;
+- from equal to to accepted;
+- from greater than to rejected;
+- cursor/filter mismatch rejected;
+- safe 422 flow;
+- validation performs no database access;
+- validation performs no session access;
+- validation performs no service access;
+- validation performs no repository access;
+- validation errors expose no raw query values;
+- validation errors expose no cursor payload.
+
+## Phase B1 test quality requirements
+
+Tests must:
+
+- be black-box contract tests;
+- have meaningful names;
+- avoid external dependencies;
+- avoid PostgreSQL;
+- avoid environment-value reads;
+- avoid duplicated production logic;
+- follow current pytest conventions;
+- use shared fixtures only when they already exist;
+- not weaken assertions to simplify future implementation.
+
+If an existing fixture must be modified, report the requirement and stop.
+Do not modify it automatically.
+
+## Required workflow
+
+Before editing:
+
+1. report repository root;
+2. report worktree path;
+3. report detached HEAD and base commit;
+4. report exact Git status;
+5. list every loaded AGENTS.md;
+6. list selected skills and order;
+7. run the current offline baseline;
+8. run pip check;
+9. inspect current schema, error, and test conventions;
+10. report the planned test structure;
+11. explain how production logic will not be duplicated;
+12. report the expected missing-symbol RED boundary.
+
+After editing:
+
+1. run both new test files;
+2. confirm failures are only missing approved production symbols;
+3. run all existing tests while excluding both new files;
+4. run pip check;
+5. run git diff --check;
+6. verify exactly two new files exist;
+7. scan for credentials, database URLs, local paths, and secrets;
+8. report test count and line count;
+9. report final Git status and diff stat;
+10. stop for manual review.
+
+## Test commands
 
 Use only:
 
 C:\Users\nazar\Desktop\AirMonitor\backend\.venv\Scripts\python.exe
 
-Every pytest invocation must include:
+Every pytest command must include:
 
 -B -p no:cacheprovider
 
-Run:
+Do not activate live integration tests.
 
-- full offline backend suite;
-- OpenAPI tests;
-- relevant schema tests;
-- relevant service and repository tests;
-- integration guard tests;
-- pip check;
-- Alembic heads;
-- git diff --check.
+Do not connect to PostgreSQL.
 
-Generate OpenAPI offline without database access.
+Do not read or print ambient database URL values.
 
-Expected baseline before implementation:
+Expected existing baseline:
 
 - 550 passed;
 - 2 skipped;
@@ -603,40 +372,56 @@ Expected baseline before implementation:
 - one /health;
 - one Alembic head: a4f9c2e7d1b6.
 
-## Safety
+## Allowed changes
+
+Only:
+
+- backend/tests/test_telemetry_cursor.py
+- backend/tests/test_telemetry_query_validation.py
+
+## Forbidden changes
+
+Do not modify:
+
+- AGENTS.md after the scope commit;
+- backend/app;
+- existing tests;
+- backend/alembic;
+- requirements;
+- settings;
+- README;
+- approved specifications, audits, or plans;
+- legacy files;
+- Agent Skills;
+- Git configuration.
+
+## Git restrictions
 
 Do not:
 
-- connect to PostgreSQL;
-- create a database;
-- run live integration tests;
-- read or print database URL values;
-- modify production code;
-- modify tests;
-- modify migrations;
-- install dependencies;
-- stage files;
+- stage;
 - commit;
 - push;
-- create branches;
+- create or delete branches;
+- reset;
+- clean;
+- stash;
 - modify Git configuration.
 
 Read-only Git commands are allowed.
 
 ## Definition of done
 
-Phase A is complete only when:
+Phase B1 is complete only when:
 
-- both required documents exist;
-- all factual claims are source-grounded;
-- the exact current index inventory is documented;
-- an explicit migration decision is made;
-- cursor behavior is implementation-ready;
-- strict query validation has a concrete implementation strategy;
-- the work is divided into small test-first phases;
-- no production or test file changed;
-- offline baseline remains green;
-- no sensitive information is exposed;
-- final Git status is reported;
+- exactly two new test files exist;
+- no production file changed;
+- approved contracts are comprehensively covered;
+- tests do not duplicate production implementation;
+- focused tests are intentionally RED only because approved symbols do not
+  exist;
+- existing offline tests remain green;
+- no database or secret access occurs;
+- Git index remains unchanged;
 - work stops for manual external review.
 '@ | Set-Content -Path ".\AGENTS.md" -Encoding UTF8
