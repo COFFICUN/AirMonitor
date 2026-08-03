@@ -100,16 +100,6 @@ class MeasurementSession(Base):
             "aqi_pm25 IS NULL OR aqi_pm25 BETWEEN 0 AND 500",
             name="ck_measurement_sessions_aqi_pm25_range",
         ),
-        Index(
-            "ix_measurement_sessions_device_id_started_at",
-            "device_id",
-            "started_at",
-        ),
-        Index(
-            "ix_measurement_sessions_device_id_status",
-            "device_id",
-            "status",
-        ),
     )
 
     id: Mapped[int] = mapped_column(
@@ -203,3 +193,18 @@ class MeasurementSession(Base):
         passive_deletes="all",
         uselist=False,
     )
+
+
+Index(
+    "ix_measurement_sessions_device_id_started_at_id_desc",
+    MeasurementSession.__table__.c.device_id,
+    MeasurementSession.__table__.c.started_at.desc(),
+    MeasurementSession.__table__.c.id.desc(),
+)
+Index(
+    "ix_measurement_sessions_device_id_status_started_at_id_desc",
+    MeasurementSession.__table__.c.device_id,
+    MeasurementSession.__table__.c.status,
+    MeasurementSession.__table__.c.started_at.desc(),
+    MeasurementSession.__table__.c.id.desc(),
+)

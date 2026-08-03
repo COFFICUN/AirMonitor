@@ -20,6 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     inspect,
 )
+from sqlalchemy.dialects import postgresql
 
 from app.db.base import Base
 from app.db.models import (
@@ -504,22 +505,39 @@ def test_unique_constraints_support_identity_and_duplicate_protection() -> None:
 
 def test_expected_indexes_are_present_without_unique_constraint_duplicates() -> None:
     expected_indexes = {
-        "ix_measurement_sessions_device_id_started_at": (
+        "ix_measurement_sessions_device_id_started_at_id_desc": (
             "device_id",
-            "started_at",
+            "started_at desc",
+            "id desc",
         ),
-        "ix_measurement_sessions_device_id_status": ("device_id", "status"),
-        "ix_raw_measurements_device_id_measured_at": (
+        "ix_measurement_sessions_device_id_status_started_at_id_desc": (
             "device_id",
-            "measured_at",
+            "status",
+            "started_at desc",
+            "id desc",
         ),
-        "ix_raw_measurements_session_id_measured_at": (
+        "ix_raw_measurements_device_id_measured_at_id_desc": (
+            "device_id",
+            "measured_at desc",
+            "id desc",
+        ),
+        "ix_raw_measurements_session_id_measured_at_id_desc": (
             "session_id",
-            "measured_at",
+            "measured_at desc",
+            "id desc",
         ),
     }
     actual_indexes = {
-        index.name: tuple(column.name for column in index.columns)
+        index.name: tuple(
+            " ".join(
+                str(expression.compile(dialect=postgresql.dialect()))
+                .replace(f"{table.name}.", "")
+                .replace(f'"{table.name}".', "")
+                .casefold()
+                .split()
+            )
+            for expression in index.expressions
+        )
         for table in Base.metadata.tables.values()
         for index in table.indexes
     }
@@ -537,6 +555,12 @@ def test_expected_indexes_are_present_without_unique_constraint_duplicates() -> 
         for _, columns in unique_constraints(table_name)
     }
     assert not unique_signatures.intersection(actual_indexes.values())
+    assert not {
+        "ix_measurement_sessions_device_id_started_at",
+        "ix_measurement_sessions_device_id_status",
+        "ix_raw_measurements_device_id_measured_at",
+        "ix_raw_measurements_session_id_measured_at",
+    }.intersection(actual_indexes)
 
 
 def test_all_timestamp_columns_are_timezone_aware() -> None:
@@ -794,14 +818,19 @@ def test_mapper_configuration_emits_no_sqlalchemy_warnings() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_exactly_one_initial_alembic_revision_exists() -> None:
+def test_exactly_one_initial_and_one_telemetry_revision_exist() -> None:
     revision_files = sorted(
         path.name
         for path in (BACKEND_DIRECTORY / "alembic" / "versions").glob("*.py")
         if path.name != "__init__.py"
     )
 
-    assert len(revision_files) == 1
-    assert revision_files[0].endswith(
-        "_create_initial_airmonitor_schema.py"
-    )
+    assert len(revision_files) == 2
+    assert sum(
+        path.endswith("_create_initial_airmonitor_schema.py")
+        for path in revision_files
+    ) == 1
+    assert sum(
+        path.endswith("_add_telemetry_read_indexes.py")
+        for path in revision_files
+    ) == 1

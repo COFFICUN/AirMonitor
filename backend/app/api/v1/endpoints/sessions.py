@@ -7,6 +7,11 @@ from fastapi import APIRouter, Body, Depends, Path, status
 from app.api.dependencies import (
     get_active_session_query_service,
     get_measurement_service,
+    get_session_telemetry_query_service,
+)
+from app.api.query_validation import (
+    resolve_session_read_request,
+    strict_session_query_parameters,
 )
 from app.api.responses import error_responses
 from app.schemas._base import POSTGRES_INTEGER_MAX
@@ -15,8 +20,11 @@ from app.schemas.sessions import (
     SessionResponse,
     SessionTransitionRequest,
 )
+from app.schemas.telemetry import SessionListResponse
 from app.services.measurement import MeasurementService
 from app.services.queries import ActiveSessionQueryService
+from app.services.telemetry import SessionTelemetryQueryService
+from app.services.telemetry_cursor import SessionReadRequest
 
 
 router = APIRouter(
@@ -53,6 +61,32 @@ async def start_measurement_session(
         **request.model_dump(),
     )
     return SessionResponse.model_validate(measurement_session)
+
+
+@router.get(
+    "",
+    response_model=SessionListResponse,
+    status_code=status.HTTP_200_OK,
+    responses=error_responses(404, 422),
+    operation_id="list_device_sessions",
+    dependencies=[Depends(strict_session_query_parameters)],
+)
+async def list_device_sessions(
+    device_id: DeviceId,
+    read_request: Annotated[
+        SessionReadRequest,
+        Depends(resolve_session_read_request),
+    ],
+    service: Annotated[
+        SessionTelemetryQueryService,
+        Depends(get_session_telemetry_query_service),
+    ],
+) -> SessionListResponse:
+    page = await service.list_sessions(read_request=read_request)
+    return SessionListResponse(
+        items=list(page.items),
+        next_cursor=page.next_cursor,
+    )
 
 
 @router.get(

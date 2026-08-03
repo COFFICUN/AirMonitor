@@ -74,7 +74,7 @@ EXPECTED_TABLES = {
     "measurement_sessions",
     "raw_measurements",
 }
-EXPECTED_ALEMBIC_HEAD = "a4f9c2e7d1b6"
+EXPECTED_ALEMBIC_HEAD = "a75caa2b44f5"
 RESET_FAILURE_MESSAGE = (
     "Persistence integration database reset failed."
 )

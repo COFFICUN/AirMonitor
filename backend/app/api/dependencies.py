@@ -12,6 +12,10 @@ from app.services.queries import (
     ActiveSessionQueryService,
     DeviceQueryService,
 )
+from app.services.telemetry import (
+    MeasurementTelemetryQueryService,
+    SessionTelemetryQueryService,
+)
 
 
 RequestSession = Annotated[AsyncSession, Depends(get_db_session)]
@@ -39,9 +43,23 @@ def get_active_session_query_service(
     return ActiveSessionQueryService(session)
 
 
+def get_session_telemetry_query_service(
+    session: RequestSession,
+) -> SessionTelemetryQueryService:
+    return SessionTelemetryQueryService(session)
+
+
+def get_measurement_telemetry_query_service(
+    session: RequestSession,
+) -> MeasurementTelemetryQueryService:
+    return MeasurementTelemetryQueryService(session)
+
+
 __all__ = [
     "get_active_session_query_service",
     "get_device_query_service",
     "get_device_service",
     "get_measurement_service",
+    "get_measurement_telemetry_query_service",
+    "get_session_telemetry_query_service",
 ]

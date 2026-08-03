@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import importlib
 from pathlib import Path
 import runpy
+import sys
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
@@ -164,7 +165,7 @@ class FakeScalarResult:
         return self
 
     def all(self) -> list[str]:
-        return ["a4f9c2e7d1b6"]
+        return ["a75caa2b44f5"]
 
 
 class FakeInspector:
@@ -266,6 +267,8 @@ def _load_suite_namespace(
         spec.validator_name,
         validate_target,
     )
+    if spec.name == "api":
+        sys.modules.pop("tests.api_integration_runtime", None)
     return runpy.run_path(str(spec.module_path))
 
 

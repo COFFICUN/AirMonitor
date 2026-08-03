@@ -1,11 +1,17 @@
 """Persistence operations for measurement sessions."""
 
-from datetime import datetime
+from __future__ import annotations
 
-from sqlalchemy import select, update
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import MeasurementSession
+
+if TYPE_CHECKING:
+    from app.services.telemetry_cursor import CursorPosition
 
 
 class MeasurementSessionRepository:
@@ -47,6 +53,49 @@ class MeasurementSessionRepository:
         )
         result = await self._session.execute(statement)
         return result.scalar_one_or_none()
+
+    async def list_for_device(
+        self,
+        *,
+        device_id: int,
+        status: str | None,
+        started_from: datetime | None,
+        started_to: datetime | None,
+        position: CursorPosition | None,
+        limit: int,
+    ) -> list[MeasurementSession]:
+        statement = select(MeasurementSession).where(
+            MeasurementSession.device_id == device_id
+        )
+        if status is not None:
+            statement = statement.where(
+                MeasurementSession.status == status
+            )
+        if started_from is not None:
+            statement = statement.where(
+                MeasurementSession.started_at >= started_from
+            )
+        if started_to is not None:
+            statement = statement.where(
+                MeasurementSession.started_at < started_to
+            )
+        if position is not None:
+            statement = statement.where(
+                or_(
+                    MeasurementSession.started_at < position.timestamp,
+                    and_(
+                        MeasurementSession.started_at
+                        == position.timestamp,
+                        MeasurementSession.id < position.identifier,
+                    ),
+                )
+            )
+        statement = statement.order_by(
+            MeasurementSession.started_at.desc(),
+            MeasurementSession.id.desc(),
+        ).limit(limit + 1)
+        result = await self._session.execute(statement)
+        return result.scalars().all()
 
     async def create(
         self,
