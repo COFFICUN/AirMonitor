@@ -1,7 +1,8 @@
-"""Connection-free tests for the initial AirMonitor Alembic migration."""
+"""Connection-free tests for the AirMonitor Alembic migration chain."""
 
 from __future__ import annotations
 
+import ast
 from collections import Counter
 from contextlib import ExitStack, contextmanager
 from importlib.util import module_from_spec, spec_from_file_location
@@ -43,7 +44,8 @@ EXPECTED_CREATE_ORDER = (
     "raw_measurements",
 )
 EXPECTED_DROP_ORDER = tuple(reversed(EXPECTED_CREATE_ORDER))
-EXPECTED_INDEXES = {
+INITIAL_REVISION_ID = "a4f9c2e7d1b6"
+EXPECTED_INITIAL_INDEXES = {
     "ix_measurement_sessions_device_id_started_at": (
         "measurement_sessions",
         ("device_id", "started_at"),
@@ -61,7 +63,26 @@ EXPECTED_INDEXES = {
         ("session_id", "measured_at"),
     ),
 }
-EXPECTED_INDEX_ORDER = tuple(EXPECTED_INDEXES)
+EXPECTED_INITIAL_INDEX_ORDER = tuple(EXPECTED_INITIAL_INDEXES)
+EXPECTED_TELEMETRY_INDEXES = {
+    "ix_measurement_sessions_device_id_started_at_id_desc": (
+        "measurement_sessions",
+        ("device_id", "started_at desc", "id desc"),
+    ),
+    "ix_measurement_sessions_device_id_status_started_at_id_desc": (
+        "measurement_sessions",
+        ("device_id", "status", "started_at desc", "id desc"),
+    ),
+    "ix_raw_measurements_device_id_measured_at_id_desc": (
+        "raw_measurements",
+        ("device_id", "measured_at desc", "id desc"),
+    ),
+    "ix_raw_measurements_session_id_measured_at_id_desc": (
+        "raw_measurements",
+        ("session_id", "measured_at desc", "id desc"),
+    ),
+}
+EXPECTED_TELEMETRY_INDEX_ORDER = tuple(EXPECTED_TELEMETRY_INDEXES)
 OBSOLETE_TABLES = {
     "aggregated_measurements",
     "measurements",
@@ -96,15 +117,15 @@ def migration_safety_guard() -> Iterator[None]:
 
 @pytest.fixture(scope="module")
 def revision_path() -> Path:
-    revision_files = sorted(
+    revision_files = [
         path
         for path in VERSIONS_DIRECTORY.glob("*.py")
         if path.name != "__init__.py"
-    )
+        and path.name.startswith(f"{INITIAL_REVISION_ID}_")
+    ]
 
-    assert revision_files, "missing initial Alembic revision"
     assert len(revision_files) == 1, (
-        "expected exactly one initial Alembic revision, found "
+        "expected the one approved initial Alembic revision, found "
         f"{[path.name for path in revision_files]}"
     )
     return revision_files[0]
@@ -124,8 +145,43 @@ def revision_module(revision_path: Path) -> ModuleType:
 
 
 @pytest.fixture(scope="module")
-def script_directory(revision_path: Path) -> ScriptDirectory:
-    del revision_path
+def telemetry_revision_path(revision_path: Path) -> Path:
+    revision_files = sorted(
+        path
+        for path in VERSIONS_DIRECTORY.glob("*.py")
+        if path.name != "__init__.py" and path != revision_path
+    )
+
+    assert len(revision_files) == 1, (
+        "expected exactly one telemetry index revision after the initial "
+        f"revision, found {[path.name for path in revision_files]}"
+    )
+    path = revision_files[0]
+    assert path.name.endswith("_add_telemetry_read_indexes.py")
+    return path
+
+
+@pytest.fixture(scope="module")
+def telemetry_revision_module(
+    telemetry_revision_path: Path,
+) -> ModuleType:
+    module_name = f"airmonitor_migration_{telemetry_revision_path.stem}"
+    specification = spec_from_file_location(
+        module_name,
+        telemetry_revision_path,
+    )
+
+    assert specification is not None
+    assert specification.loader is not None
+
+    module = module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def script_directory(telemetry_revision_path: Path) -> ScriptDirectory:
+    del telemetry_revision_path
     return ScriptDirectory.from_config(_alembic_config()[0])
 
 
@@ -216,8 +272,7 @@ def downgrade_events(revision_module: ModuleType) -> list[tuple[str, str]]:
 
 @pytest.fixture(scope="module")
 def offline_upgrade_sql(revision_module: ModuleType) -> str:
-    del revision_module
-    return _generate_offline_sql("upgrade", "head")
+    return _generate_offline_sql("upgrade", revision_module.revision)
 
 
 @pytest.fixture(scope="module")
@@ -225,6 +280,148 @@ def offline_downgrade_sql(revision_module: ModuleType) -> str:
     return _generate_offline_sql(
         "downgrade",
         f"{revision_module.revision}:base",
+    )
+
+
+def _index_expression_signature(value: Any) -> str:
+    if isinstance(value, str):
+        return value.casefold()
+
+    compiled = _normalized_sql(
+        value.compile(
+            dialect=POSTGRESQL_DIALECT,
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    for table_name in EXPECTED_CREATE_ORDER:
+        compiled = compiled.replace(f"{table_name}.", "")
+        compiled = compiled.replace(f'"{table_name}".', "")
+    return compiled
+
+
+@pytest.fixture(scope="module")
+def telemetry_upgrade_events(
+    telemetry_revision_module: ModuleType,
+) -> list[tuple[str, str, str, tuple[str, ...]]]:
+    events: list[tuple[str, str, str, tuple[str, ...]]] = []
+
+    def capture_create(
+        index_name: str,
+        table_name: str,
+        columns: list[Any] | tuple[Any, ...],
+        **keywords: Any,
+    ) -> None:
+        assert keywords == {"unique": False}
+        events.append(
+            (
+                "create",
+                index_name,
+                table_name,
+                tuple(
+                    _index_expression_signature(column)
+                    for column in columns
+                ),
+            )
+        )
+
+    def capture_drop(index_name: str, **keywords: Any) -> None:
+        table_name = keywords.pop("table_name")
+        assert keywords == {}
+        events.append(("drop", index_name, table_name, ()))
+
+    with (
+        patch.object(
+            telemetry_revision_module.op,
+            "create_index",
+            side_effect=capture_create,
+        ),
+        patch.object(
+            telemetry_revision_module.op,
+            "drop_index",
+            side_effect=capture_drop,
+        ),
+        patch.object(
+            telemetry_revision_module.op,
+            "execute",
+            side_effect=AssertionError("unexpected raw migration SQL"),
+        ),
+    ):
+        telemetry_revision_module.upgrade()
+
+    return events
+
+
+@pytest.fixture(scope="module")
+def telemetry_downgrade_events(
+    telemetry_revision_module: ModuleType,
+) -> list[tuple[str, str, str, tuple[str, ...]]]:
+    events: list[tuple[str, str, str, tuple[str, ...]]] = []
+
+    def capture_create(
+        index_name: str,
+        table_name: str,
+        columns: list[Any] | tuple[Any, ...],
+        **keywords: Any,
+    ) -> None:
+        assert keywords == {"unique": False}
+        events.append(
+            (
+                "create",
+                index_name,
+                table_name,
+                tuple(
+                    _index_expression_signature(column)
+                    for column in columns
+                ),
+            )
+        )
+
+    def capture_drop(index_name: str, **keywords: Any) -> None:
+        table_name = keywords.pop("table_name")
+        assert keywords == {}
+        events.append(("drop", index_name, table_name, ()))
+
+    with (
+        patch.object(
+            telemetry_revision_module.op,
+            "create_index",
+            side_effect=capture_create,
+        ),
+        patch.object(
+            telemetry_revision_module.op,
+            "drop_index",
+            side_effect=capture_drop,
+        ),
+        patch.object(
+            telemetry_revision_module.op,
+            "execute",
+            side_effect=AssertionError("unexpected raw migration SQL"),
+        ),
+    ):
+        telemetry_revision_module.downgrade()
+
+    return events
+
+
+@pytest.fixture(scope="module")
+def offline_telemetry_upgrade_sql(
+    revision_module: ModuleType,
+    telemetry_revision_module: ModuleType,
+) -> str:
+    return _generate_offline_sql(
+        "upgrade",
+        f"{revision_module.revision}:{telemetry_revision_module.revision}",
+    )
+
+
+@pytest.fixture(scope="module")
+def offline_telemetry_downgrade_sql(
+    revision_module: ModuleType,
+    telemetry_revision_module: ModuleType,
+) -> str:
+    return _generate_offline_sql(
+        "downgrade",
+        f"{telemetry_revision_module.revision}:{revision_module.revision}",
     )
 
 
@@ -365,7 +562,7 @@ def _ddl_names(sql: str, operation: str, object_type: str) -> list[str]:
     ]
 
 
-def test_exactly_one_revision_file_exists(revision_path: Path) -> None:
+def test_initial_revision_file_exists(revision_path: Path) -> None:
     assert revision_path.parent == VERSIONS_DIRECTORY
 
 
@@ -380,20 +577,41 @@ def test_revision_identifiers_are_valid_and_initial(
     assert revision_module.depends_on is None
 
 
-def test_alembic_reports_one_base_and_one_head(
+def test_telemetry_revision_identifiers_are_valid_and_linear(
+    telemetry_revision_path: Path,
+    telemetry_revision_module: ModuleType,
+) -> None:
+    assert REVISION_ID_PATTERN.fullmatch(telemetry_revision_module.revision)
+    assert telemetry_revision_module.revision != INITIAL_REVISION_ID
+    assert telemetry_revision_path.name.startswith(
+        f"{telemetry_revision_module.revision}_"
+    )
+    assert telemetry_revision_module.down_revision == INITIAL_REVISION_ID
+    assert telemetry_revision_module.branch_labels is None
+    assert telemetry_revision_module.depends_on is None
+
+
+def test_alembic_reports_one_base_and_one_telemetry_head(
     revision_module: ModuleType,
+    telemetry_revision_module: ModuleType,
     script_directory: ScriptDirectory,
 ) -> None:
     assert script_directory.get_bases() == [revision_module.revision]
-    assert script_directory.get_heads() == [revision_module.revision]
+    assert script_directory.get_heads() == [
+        telemetry_revision_module.revision
+    ]
     assert [
         revision.revision
         for revision in script_directory.walk_revisions()
-    ] == [revision_module.revision]
+    ] == [
+        telemetry_revision_module.revision,
+        revision_module.revision,
+    ]
 
 
-def test_alembic_history_and_heads_include_only_initial_revision(
+def test_alembic_history_and_heads_include_linear_revision_chain(
     revision_module: ModuleType,
+    telemetry_revision_module: ModuleType,
 ) -> None:
     history_config, history_stdout, _ = _alembic_config()
     heads_config, heads_stdout, _ = _alembic_config()
@@ -401,14 +619,24 @@ def test_alembic_history_and_heads_include_only_initial_revision(
     command.history(history_config)
     command.heads(heads_config)
 
-    history_output = history_stdout.getvalue()
+    history_lines = history_stdout.getvalue().splitlines()
     heads_output = heads_stdout.getvalue()
-    assert history_output.count(revision_module.revision) == 1
-    assert heads_output.count(revision_module.revision) == 1
-    assert "create initial AirMonitor schema" in history_output
+    assert history_lines == [
+        (
+            f"{revision_module.revision} -> "
+            f"{telemetry_revision_module.revision} (head), "
+            "add telemetry read indexes"
+        ),
+        (
+            f"<base> -> {revision_module.revision}, "
+            "create initial AirMonitor schema"
+        ),
+    ]
+    assert revision_module.revision not in heads_output
+    assert heads_output.count(telemetry_revision_module.revision) == 1
 
 
-def test_upgrade_structure_matches_orm_metadata(
+def test_initial_upgrade_structure_matches_initial_contract(
     migration_structure: tuple[
         MetaData,
         dict[str, tuple[str, tuple[str, ...], bool]],
@@ -439,18 +667,10 @@ def test_upgrade_structure_matches_orm_metadata(
 
     assert indexes == {
         index_name: (table_name, columns, False)
-        for index_name, (table_name, columns) in EXPECTED_INDEXES.items()
-    }
-    orm_indexes = {
-        index.name: (
-            table.name,
-            tuple(column.name for column in index.columns),
-            bool(index.unique),
+        for index_name, (table_name, columns) in (
+            EXPECTED_INITIAL_INDEXES.items()
         )
-        for table in Base.metadata.tables.values()
-        for index in table.indexes
     }
-    assert indexes == orm_indexes
 
 
 def test_upgrade_creation_order_is_dependency_safe(
@@ -468,7 +688,8 @@ def test_upgrade_creation_order_is_dependency_safe(
         ("table", table_name) for table_name in EXPECTED_CREATE_ORDER
     ]
     assert Counter(index_events) == Counter(
-        ("index", index_name) for index_name in EXPECTED_INDEXES
+        ("index", index_name)
+        for index_name in EXPECTED_INITIAL_INDEXES
     )
     assert events == [*table_events, *index_events]
 
@@ -484,7 +705,8 @@ def test_downgrade_drops_indexes_then_tables_in_reverse_order(
     ]
 
     assert Counter(index_events) == Counter(
-        ("index", index_name) for index_name in EXPECTED_INDEXES
+        ("index", index_name)
+        for index_name in EXPECTED_INITIAL_INDEXES
     )
     assert table_events == [
         ("table", table_name) for table_name in EXPECTED_DROP_ORDER
@@ -550,7 +772,9 @@ def test_offline_upgrade_creates_each_approved_index_once(
 ) -> None:
     created_indexes = _ddl_names(offline_upgrade_sql, "create", "index")
 
-    assert Counter(created_indexes) == Counter(EXPECTED_INDEXES.keys())
+    assert Counter(created_indexes) == Counter(
+        EXPECTED_INITIAL_INDEXES.keys()
+    )
     assert "create unique index" not in _normalized_sql(offline_upgrade_sql)
 
 
@@ -568,7 +792,9 @@ def test_offline_downgrade_drops_indexes_and_tables_in_reverse_order(
         if table_name != "alembic_version"
     ]
 
-    assert Counter(dropped_indexes) == Counter(EXPECTED_INDEXES.keys())
+    assert Counter(dropped_indexes) == Counter(
+        EXPECTED_INITIAL_INDEXES.keys()
+    )
     assert dropped_tables == list(EXPECTED_DROP_ORDER)
     assert offline_downgrade_sql.lower().find("drop index") < (
         offline_downgrade_sql.lower().find("drop table")
@@ -608,3 +834,182 @@ def test_offline_generation_never_uses_runtime_settings_or_connections(
 ) -> None:
     assert offline_upgrade_sql
     assert offline_downgrade_sql
+
+
+def test_telemetry_upgrade_has_exact_create_then_drop_operations(
+    telemetry_upgrade_events: list[
+        tuple[str, str, str, tuple[str, ...]]
+    ],
+) -> None:
+    expected_creates = [
+        ("create", index_name, table_name, expressions)
+        for index_name, (table_name, expressions) in (
+            EXPECTED_TELEMETRY_INDEXES.items()
+        )
+    ]
+    expected_drops = [
+        ("drop", index_name, table_name, ())
+        for index_name, (table_name, _) in (
+            EXPECTED_INITIAL_INDEXES.items()
+        )
+    ]
+
+    assert telemetry_upgrade_events == [
+        *expected_creates,
+        *expected_drops,
+    ]
+
+
+def test_telemetry_downgrade_has_exact_recreate_then_drop_operations(
+    telemetry_downgrade_events: list[
+        tuple[str, str, str, tuple[str, ...]]
+    ],
+) -> None:
+    expected_recreates = [
+        ("create", index_name, table_name, expressions)
+        for index_name, (table_name, expressions) in (
+            EXPECTED_INITIAL_INDEXES.items()
+        )
+    ]
+    expected_drops = [
+        ("drop", index_name, table_name, ())
+        for index_name, (table_name, _) in (
+            EXPECTED_TELEMETRY_INDEXES.items()
+        )
+    ]
+
+    assert telemetry_downgrade_events == [
+        *expected_recreates,
+        *expected_drops,
+    ]
+
+
+def test_telemetry_head_index_inventory_matches_orm_metadata() -> None:
+    orm_indexes = {
+        index.name: (
+            table.name,
+            tuple(
+                _index_expression_signature(expression)
+                for expression in index.expressions
+            ),
+            bool(index.unique),
+        )
+        for table in Base.metadata.tables.values()
+        for index in table.indexes
+    }
+    expected_indexes = {
+        index_name: (table_name, expressions, False)
+        for index_name, (table_name, expressions) in (
+            EXPECTED_TELEMETRY_INDEXES.items()
+        )
+    }
+
+    assert orm_indexes == expected_indexes
+    assert not set(EXPECTED_INITIAL_INDEXES).intersection(orm_indexes)
+
+
+def test_telemetry_revision_uses_only_index_operations(
+    telemetry_revision_path: Path,
+) -> None:
+    syntax_tree = ast.parse(
+        telemetry_revision_path.read_text(encoding="utf-8")
+    )
+    functions = {
+        node.name: node
+        for node in syntax_tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"upgrade", "downgrade"}
+    }
+    assert set(functions) == {"upgrade", "downgrade"}
+
+    for function in functions.values():
+        operation_names = [
+            node.func.attr
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "op"
+        ]
+        assert Counter(operation_names) == Counter(
+            {"create_index": 4, "drop_index": 4}
+        )
+
+
+def test_offline_telemetry_upgrade_preserves_postgresql_index_contract(
+    offline_telemetry_upgrade_sql: str,
+) -> None:
+    assert _ddl_names(
+        offline_telemetry_upgrade_sql,
+        "create",
+        "index",
+    ) == list(EXPECTED_TELEMETRY_INDEX_ORDER)
+    assert _ddl_names(
+        offline_telemetry_upgrade_sql,
+        "drop",
+        "index",
+    ) == list(EXPECTED_INITIAL_INDEX_ORDER)
+
+    normalized_sql = _normalized_sql(offline_telemetry_upgrade_sql)
+    for index_name, (table_name, expressions) in (
+        EXPECTED_TELEMETRY_INDEXES.items()
+    ):
+        definition = (
+            f"create index {index_name} on {table_name} "
+            f"({', '.join(expressions)})"
+        )
+        assert definition in normalized_sql
+
+    assert "create unique index" not in normalized_sql
+
+
+def test_offline_telemetry_downgrade_restores_postgresql_index_contract(
+    offline_telemetry_downgrade_sql: str,
+) -> None:
+    assert _ddl_names(
+        offline_telemetry_downgrade_sql,
+        "create",
+        "index",
+    ) == list(EXPECTED_INITIAL_INDEX_ORDER)
+    assert _ddl_names(
+        offline_telemetry_downgrade_sql,
+        "drop",
+        "index",
+    ) == list(EXPECTED_TELEMETRY_INDEX_ORDER)
+
+    normalized_sql = _normalized_sql(offline_telemetry_downgrade_sql)
+    for index_name, (table_name, expressions) in (
+        EXPECTED_INITIAL_INDEXES.items()
+    ):
+        definition = (
+            f"create index {index_name} on {table_name} "
+            f"({', '.join(expressions)})"
+        )
+        assert definition in normalized_sql
+
+    assert "create unique index" not in normalized_sql
+
+
+def test_offline_telemetry_sql_contains_only_index_ddl(
+    offline_telemetry_upgrade_sql: str,
+    offline_telemetry_downgrade_sql: str,
+) -> None:
+    combined_sql = _normalized_sql(
+        f"{offline_telemetry_upgrade_sql}\n"
+        f"{offline_telemetry_downgrade_sql}"
+    )
+
+    assert not _ddl_names(combined_sql, "create", "table")
+    assert not _ddl_names(combined_sql, "drop", "table")
+    for object_type in (
+        "database",
+        "extension",
+        "role",
+        "schema",
+        "trigger",
+        "user",
+    ):
+        assert not re.search(
+            rf"\b(?:create|drop)\s+{object_type}\b",
+            combined_sql,
+        )

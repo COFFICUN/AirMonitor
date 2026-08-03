@@ -103,16 +103,6 @@ class RawMeasurement(Base):
             "OR (latitude IS NOT NULL AND longitude IS NOT NULL)",
             name="ck_raw_measurements_coordinates_paired",
         ),
-        Index(
-            "ix_raw_measurements_device_id_measured_at",
-            "device_id",
-            "measured_at",
-        ),
-        Index(
-            "ix_raw_measurements_session_id_measured_at",
-            "session_id",
-            "measured_at",
-        ),
     )
 
     id: Mapped[int] = mapped_column(
@@ -185,3 +175,17 @@ class RawMeasurement(Base):
         back_populates="raw_measurements",
         foreign_keys=[session_id],
     )
+
+
+Index(
+    "ix_raw_measurements_device_id_measured_at_id_desc",
+    RawMeasurement.__table__.c.device_id,
+    RawMeasurement.__table__.c.measured_at.desc(),
+    RawMeasurement.__table__.c.id.desc(),
+)
+Index(
+    "ix_raw_measurements_session_id_measured_at_id_desc",
+    RawMeasurement.__table__.c.session_id,
+    RawMeasurement.__table__.c.measured_at.desc(),
+    RawMeasurement.__table__.c.id.desc(),
+)
