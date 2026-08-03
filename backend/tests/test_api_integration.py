@@ -3,210 +3,97 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
-import os
 from uuid import uuid4
 
 import pytest
-from httpx2 import ASGITransport, AsyncClient
-from sqlalchemy import func, inspect, select, text
-from sqlalchemy.engine import URL
+from httpx2 import AsyncClient
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
-from tests.api_integration_guard import (
-    ApiIntegrationTargetError,
-    run_api_preflight_safely,
-    validate_api_test_database_url,
-)
-
-
-_DATABASE_URL_TEXT = os.environ.get("AIRMONITOR_API_TEST_DATABASE_URL")
-if _DATABASE_URL_TEXT is None:
-    pytest.skip(
-        "API integration tests require the dedicated disposable database URL",
-        allow_module_level=True,
-    )
-
-try:
-    _parsed_database_url: URL = validate_api_test_database_url(
-        _DATABASE_URL_TEXT
-    )
-except ApiIntegrationTargetError as error:
-    pytest.fail(str(error), pytrace=False)
-
-del _DATABASE_URL_TEXT
-
-
-from app.core.config import Settings
 from app.core.exceptions import (
     ActiveSessionNotFoundError,
     InvalidTimestampError,
 )
-from app.db.base import Base
-from app.db.dependencies import get_db_session
 from app.db.models import (
     Device,
     DeviceRuntimeState,
     MeasurementSession,
     RawMeasurement,
 )
-from app.main import create_application
 from app.services.measurement import MeasurementService
-from tests.integration_database_reset import reset_application_tables
+from tests.api_integration_runtime import (
+    _preflight_disposable_database,
+    _verify_application_tables_empty,
+    anyio_backend,
+    client,
+    reset_application_tables,
+    session_factory,
+)
 
 
 pytestmark = pytest.mark.anyio
 
-EXPECTED_TABLES = {
-    "alembic_version",
-    "device_runtime_state",
-    "devices",
-    "measurement_sessions",
-    "raw_measurements",
-}
-EXPECTED_ALEMBIC_HEAD = "a4f9c2e7d1b6"
-RESET_FAILURE_MESSAGE = "API integration database reset failed."
 
-
-@pytest.fixture(scope="session")
-def anyio_backend() -> str:
-    return "asyncio"
-
-
-async def _preflight_disposable_database(engine: AsyncEngine) -> None:
-    async with engine.connect() as connection:
-        async with connection.begin():
-            await connection.execute(text("SET TRANSACTION READ ONLY"))
-            table_names = await connection.run_sync(
-                lambda sync_connection: set(
-                    inspect(sync_connection).get_table_names()
-                )
-            )
-            if table_names != EXPECTED_TABLES:
-                raise RuntimeError(
-                    "API schema inventory is not approved"
-                )
-
-            alembic_heads = (
-                await connection.execute(
-                    text("SELECT version_num FROM alembic_version")
-                )
-            ).scalars().all()
-            if alembic_heads != [EXPECTED_ALEMBIC_HEAD]:
-                raise RuntimeError(
-                    "API schema revision is not approved"
-                )
-
-
-
-async def _verify_application_tables_empty(
-    engine: AsyncEngine,
-) -> None:
-    tables = tuple(Base.metadata.tables.values())
-    if not tables:
-        raise RuntimeError("application metadata has no tables")
-
-    async with engine.connect() as connection:
-        async with connection.begin():
-            await connection.execute(text("SET TRANSACTION READ ONLY"))
-            row_counts = [
-                await connection.scalar(
-                    select(func.count()).select_from(table)
-                )
-                for table in tables
-            ]
-            if any(row_count != 0 for row_count in row_counts):
-                raise RuntimeError(
-                    "API application tables are not empty"
-                )
-
-
-@pytest.fixture(scope="session")
-async def session_factory(
-    anyio_backend: str,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    assert anyio_backend == "asyncio"
-    engine = create_async_engine(
-        _parsed_database_url,
-        echo=False,
-        pool_pre_ping=True,
-        connect_args={
-            "server_settings": {
-                "statement_timeout": "15000",
-            }
-        },
+async def _seed_device(
+    session: AsyncSession,
+    *,
+    scenario: str,
+) -> Device:
+    device = Device(
+        device_uid=f"api-read-{scenario}-{uuid4().hex}",
+        is_active=True,
     )
-    factory = async_sessionmaker(
-        bind=engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autoflush=False,
+    session.add(device)
+    await session.flush()
+    return device
+
+
+async def _seed_measurement_session(
+    session: AsyncSession,
+    *,
+    device_id: int,
+    status_value: str,
+    started_at: datetime,
+) -> MeasurementSession:
+    measurement_session = MeasurementSession(
+        device_id=device_id,
+        status=status_value,
+        started_at=started_at,
+        ended_at=(
+            None
+            if status_value == "active"
+            else started_at + timedelta(minutes=30)
+        ),
+        latitude=51.1694,
+        longitude=71.4491,
+        sample_count=0,
     )
-    try:
-        await run_api_preflight_safely(
-            lambda: _preflight_disposable_database(engine),
-        )
-        await reset_application_tables(
-            engine,
-            Base.metadata,
-            RESET_FAILURE_MESSAGE,
-        )
-        await run_api_preflight_safely(
-            lambda: _verify_application_tables_empty(engine)
-        )
-
-        # Exit the handler before cleanup so a reset failure cannot retain
-        # the suite error as its exception context.
-        suite_error: BaseException | None = None
-        try:
-            yield factory
-        except BaseException as error:
-            suite_error = error
-
-        await reset_application_tables(
-            engine,
-            Base.metadata,
-            RESET_FAILURE_MESSAGE,
-        )
-        if suite_error is not None:
-            raise suite_error.with_traceback(
-                suite_error.__traceback__
-            ) from None
-    finally:
-        await engine.dispose()
+    session.add(measurement_session)
+    await session.flush()
+    return measurement_session
 
 
-@pytest.fixture
-async def client(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> AsyncIterator[AsyncClient]:
-    application = create_application(Settings(_env_file=None))
-    original_overrides = dict(application.dependency_overrides)
-
-    async def integration_session() -> AsyncIterator[AsyncSession]:
-        async with session_factory() as session:
-            yield session
-
-    application.dependency_overrides[get_db_session] = integration_session
-    transport = ASGITransport(
-        app=application,
-        raise_app_exceptions=False,
+async def _seed_measurement(
+    session: AsyncSession,
+    *,
+    device_id: int,
+    session_id: int,
+    measured_at: datetime,
+) -> RawMeasurement:
+    measurement = RawMeasurement(
+        device_id=device_id,
+        session_id=session_id,
+        source_message_id=f"api-read-message-{uuid4().hex}",
+        measured_at=measured_at,
+        pm25=7.5,
     )
-    try:
-        async with AsyncClient(
-            transport=transport,
-            base_url="http://testserver",
-        ) as integration_client:
-            yield integration_client
-    finally:
-        application.dependency_overrides.clear()
-        application.dependency_overrides.update(original_overrides)
+    session.add(measurement)
+    await session.flush()
+    return measurement
 
 
 async def test_complete_http_lifecycle_and_rollback_behavior(
@@ -410,6 +297,402 @@ async def test_cancel_session_clears_runtime_state(
     assert runtime_state.active_session_id is None
     assert persisted_session is not None
     assert persisted_session.status == "cancelled"
+
+
+async def test_session_collection_postgresql_contract(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    base_time = datetime(2026, 8, 1, 10, 0, tzinfo=UTC)
+    async with session_factory() as database_session:
+        async with database_session.begin():
+            device = await _seed_device(
+                database_session,
+                scenario="sessions",
+            )
+            empty_device = await _seed_device(
+                database_session,
+                scenario="sessions-empty",
+            )
+            other_device = await _seed_device(
+                database_session,
+                scenario="sessions-other",
+            )
+            oldest = await _seed_measurement_session(
+                database_session,
+                device_id=device.id,
+                status_value="completed",
+                started_at=base_time,
+            )
+            middle = await _seed_measurement_session(
+                database_session,
+                device_id=device.id,
+                status_value="completed",
+                started_at=base_time + timedelta(hours=1),
+            )
+            tied_lower_id = await _seed_measurement_session(
+                database_session,
+                device_id=device.id,
+                status_value="active",
+                started_at=base_time + timedelta(hours=2),
+            )
+            tied_higher_id = await _seed_measurement_session(
+                database_session,
+                device_id=device.id,
+                status_value="cancelled",
+                started_at=base_time + timedelta(hours=2),
+            )
+            other_session = await _seed_measurement_session(
+                database_session,
+                device_id=other_device.id,
+                status_value="completed",
+                started_at=base_time + timedelta(hours=3),
+            )
+
+    unknown = await client.get(
+        "/api/v1/devices/2147483647/sessions"
+    )
+    assert unknown.status_code == 404
+    assert unknown.json()["error"]["code"] == "device_not_found"
+
+    empty = await client.get(
+        f"/api/v1/devices/{empty_device.id}/sessions"
+    )
+    assert empty.status_code == 200
+    assert empty.json() == {"items": [], "next_cursor": None}
+
+    complete = await client.get(
+        f"/api/v1/devices/{device.id}/sessions"
+    )
+    assert complete.status_code == 200
+    complete_payload = complete.json()
+    expected_ids = [
+        tied_higher_id.id,
+        tied_lower_id.id,
+        middle.id,
+        oldest.id,
+    ]
+    assert [item["id"] for item in complete_payload["items"]] == (
+        expected_ids
+    )
+    assert complete_payload["next_cursor"] is None
+    assert other_session.id not in expected_ids
+
+    completed_only = await client.get(
+        f"/api/v1/devices/{device.id}/sessions",
+        params={"status": "completed"},
+    )
+    assert completed_only.status_code == 200
+    assert [
+        item["id"] for item in completed_only.json()["items"]
+    ] == [middle.id, oldest.id]
+
+    half_open = await client.get(
+        f"/api/v1/devices/{device.id}/sessions",
+        params={
+            "started_from": (base_time + timedelta(hours=1)).isoformat(),
+            "started_to": (base_time + timedelta(hours=2)).isoformat(),
+        },
+    )
+    assert half_open.status_code == 200
+    assert [item["id"] for item in half_open.json()["items"]] == [
+        middle.id
+    ]
+
+    first_page = await client.get(
+        f"/api/v1/devices/{device.id}/sessions",
+        params={"limit": 2},
+    )
+    assert first_page.status_code == 200
+    first_payload = first_page.json()
+    first_ids = [item["id"] for item in first_payload["items"]]
+    assert first_ids == expected_ids[:2]
+    assert len(first_ids) <= 2
+    assert isinstance(first_payload["next_cursor"], str)
+
+    second_page = await client.get(
+        f"/api/v1/devices/{device.id}/sessions",
+        params={
+            "limit": 2,
+            "cursor": first_payload["next_cursor"],
+        },
+    )
+    assert second_page.status_code == 200
+    second_payload = second_page.json()
+    second_ids = [item["id"] for item in second_payload["items"]]
+    assert second_ids == expected_ids[2:]
+    assert second_payload["next_cursor"] is None
+    assert set(first_ids).isdisjoint(second_ids)
+    assert first_ids + second_ids == expected_ids
+
+    rebound_cursor = await client.get(
+        f"/api/v1/devices/{device.id}/sessions",
+        params={
+            "status": "completed",
+            "cursor": first_payload["next_cursor"],
+        },
+    )
+    assert rebound_cursor.status_code == 422
+    assert (
+        rebound_cursor.json()["error"]["code"]
+        == "request_validation_error"
+    )
+
+    equal_bound = (base_time + timedelta(hours=1)).isoformat()
+    equal_existing = await client.get(
+        f"/api/v1/devices/{device.id}/sessions",
+        params={"started_from": equal_bound, "started_to": equal_bound},
+    )
+    assert equal_existing.status_code == 200
+    assert equal_existing.json() == {"items": [], "next_cursor": None}
+
+    equal_unknown = await client.get(
+        "/api/v1/devices/2147483647/sessions",
+        params={"started_from": equal_bound, "started_to": equal_bound},
+    )
+    assert equal_unknown.status_code == 404
+
+    active = await client.get(
+        f"/api/v1/devices/{device.id}/sessions/active"
+    )
+    assert active.status_code == 200
+    assert active.json()["id"] == tied_lower_id.id
+
+
+async def test_measurement_collection_postgresql_contract(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    base_time = datetime(2026, 8, 2, 10, 0, tzinfo=UTC)
+    async with session_factory() as database_session:
+        async with database_session.begin():
+            device = await _seed_device(
+                database_session,
+                scenario="measurements",
+            )
+            empty_device = await _seed_device(
+                database_session,
+                scenario="measurements-empty",
+            )
+            other_device = await _seed_device(
+                database_session,
+                scenario="measurements-other",
+            )
+            first_session = await _seed_measurement_session(
+                database_session,
+                device_id=device.id,
+                status_value="completed",
+                started_at=base_time - timedelta(hours=1),
+            )
+            second_session = await _seed_measurement_session(
+                database_session,
+                device_id=device.id,
+                status_value="completed",
+                started_at=base_time - timedelta(hours=1),
+            )
+            other_session = await _seed_measurement_session(
+                database_session,
+                device_id=other_device.id,
+                status_value="completed",
+                started_at=base_time - timedelta(hours=1),
+            )
+            oldest = await _seed_measurement(
+                database_session,
+                device_id=device.id,
+                session_id=first_session.id,
+                measured_at=base_time,
+            )
+            middle = await _seed_measurement(
+                database_session,
+                device_id=device.id,
+                session_id=first_session.id,
+                measured_at=base_time + timedelta(hours=1),
+            )
+            tied_lower_id = await _seed_measurement(
+                database_session,
+                device_id=device.id,
+                session_id=first_session.id,
+                measured_at=base_time + timedelta(hours=2),
+            )
+            tied_higher_id = await _seed_measurement(
+                database_session,
+                device_id=device.id,
+                session_id=second_session.id,
+                measured_at=base_time + timedelta(hours=2),
+            )
+            other_measurement = await _seed_measurement(
+                database_session,
+                device_id=other_device.id,
+                session_id=other_session.id,
+                measured_at=base_time + timedelta(hours=3),
+            )
+
+    unknown = await client.get(
+        "/api/v1/devices/2147483647/measurements"
+    )
+    assert unknown.status_code == 404
+    assert unknown.json()["error"]["code"] == "device_not_found"
+
+    empty = await client.get(
+        f"/api/v1/devices/{empty_device.id}/measurements"
+    )
+    assert empty.status_code == 200
+    assert empty.json() == {"items": [], "next_cursor": None}
+
+    complete = await client.get(
+        f"/api/v1/devices/{device.id}/measurements"
+    )
+    assert complete.status_code == 200
+    complete_payload = complete.json()
+    expected_ids = [
+        tied_higher_id.id,
+        tied_lower_id.id,
+        middle.id,
+        oldest.id,
+    ]
+    assert [item["id"] for item in complete_payload["items"]] == (
+        expected_ids
+    )
+    assert complete_payload["next_cursor"] is None
+    assert other_measurement.id not in expected_ids
+
+    session_filtered = await client.get(
+        f"/api/v1/devices/{device.id}/measurements",
+        params={"session_id": first_session.id},
+    )
+    assert session_filtered.status_code == 200
+    assert [
+        item["id"] for item in session_filtered.json()["items"]
+    ] == [tied_lower_id.id, middle.id, oldest.id]
+
+    half_open = await client.get(
+        f"/api/v1/devices/{device.id}/measurements",
+        params={
+            "measured_from": (base_time + timedelta(hours=1)).isoformat(),
+            "measured_to": (base_time + timedelta(hours=2)).isoformat(),
+        },
+    )
+    assert half_open.status_code == 200
+    assert [item["id"] for item in half_open.json()["items"]] == [
+        middle.id
+    ]
+
+    first_page = await client.get(
+        f"/api/v1/devices/{device.id}/measurements",
+        params={"limit": 2},
+    )
+    assert first_page.status_code == 200
+    first_payload = first_page.json()
+    first_ids = [item["id"] for item in first_payload["items"]]
+    assert first_ids == expected_ids[:2]
+    assert len(first_ids) <= 2
+    assert isinstance(first_payload["next_cursor"], str)
+
+    second_page = await client.get(
+        f"/api/v1/devices/{device.id}/measurements",
+        params={
+            "limit": 2,
+            "cursor": first_payload["next_cursor"],
+        },
+    )
+    assert second_page.status_code == 200
+    second_payload = second_page.json()
+    second_ids = [item["id"] for item in second_payload["items"]]
+    assert second_ids == expected_ids[2:]
+    assert second_payload["next_cursor"] is None
+    assert set(first_ids).isdisjoint(second_ids)
+    assert first_ids + second_ids == expected_ids
+
+    rebound_cursor = await client.get(
+        f"/api/v1/devices/{device.id}/measurements",
+        params={
+            "session_id": first_session.id,
+            "cursor": first_payload["next_cursor"],
+        },
+    )
+    assert rebound_cursor.status_code == 422
+    assert (
+        rebound_cursor.json()["error"]["code"]
+        == "request_validation_error"
+    )
+
+    other_device_filter = await client.get(
+        f"/api/v1/devices/{device.id}/measurements",
+        params={"session_id": other_session.id},
+    )
+    nonexistent_filter = await client.get(
+        f"/api/v1/devices/{device.id}/measurements",
+        params={"session_id": 2_147_483_647},
+    )
+    assert other_device_filter.status_code == 200
+    assert nonexistent_filter.status_code == 200
+    assert other_device_filter.json() == nonexistent_filter.json() == {
+        "items": [],
+        "next_cursor": None,
+    }
+
+    equal_bound = (base_time + timedelta(hours=1)).isoformat()
+    equal_existing = await client.get(
+        f"/api/v1/devices/{device.id}/measurements",
+        params={"measured_from": equal_bound, "measured_to": equal_bound},
+    )
+    assert equal_existing.status_code == 200
+    assert equal_existing.json() == {"items": [], "next_cursor": None}
+
+    equal_unknown = await client.get(
+        "/api/v1/devices/2147483647/measurements",
+        params={"measured_from": equal_bound, "measured_to": equal_bound},
+    )
+    assert equal_unknown.status_code == 404
+
+
+async def test_read_collections_preserve_write_and_active_routes(
+    client: AsyncClient,
+) -> None:
+    created = await client.post(
+        "/api/v1/devices",
+        json={"device_uid": f"api-read-compat-{uuid4().hex}"},
+    )
+    assert created.status_code == 201
+    device_id = created.json()["id"]
+
+    started = await client.post(
+        f"/api/v1/devices/{device_id}/sessions",
+        json={"latitude": 51.1694, "longitude": 71.4491},
+    )
+    assert started.status_code == 201
+    session_id = started.json()["id"]
+
+    active = await client.get(
+        f"/api/v1/devices/{device_id}/sessions/active"
+    )
+    assert active.status_code == 200
+    assert active.json()["id"] == session_id
+
+    recorded = await client.post(
+        f"/api/v1/devices/{device_id}/measurements",
+        json={
+            "measured_at": started.json()["started_at"],
+            "source_message_id": f"api-read-compat-{uuid4().hex}",
+            "pm25": 9.5,
+        },
+    )
+    assert recorded.status_code == 201
+
+    listed_sessions = await client.get(
+        f"/api/v1/devices/{device_id}/sessions"
+    )
+    listed_measurements = await client.get(
+        f"/api/v1/devices/{device_id}/measurements"
+    )
+    assert listed_sessions.status_code == 200
+    assert [
+        item["id"] for item in listed_sessions.json()["items"]
+    ] == [session_id]
+    assert listed_measurements.status_code == 200
+    assert [
+        item["id"] for item in listed_measurements.json()["items"]
+    ] == [recorded.json()["id"]]
 
 # Live PostgreSQL concurrency verification
 

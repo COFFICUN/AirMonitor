@@ -21,6 +21,10 @@ SAFE_URL = (
     "postgresql+asyncpg://integration_user"
     "@localhost:5432/airmonitor_persistence_test_guard"
 )
+SHARED_API_TEST_URL = (
+    "postgresql+asyncpg://integration_user"
+    "@127.0.0.1:5432/airmonitor_api_test_shared_guard"
+)
 PERSISTENCE_INTEGRATION_MODULE = Path(__file__).with_name(
     "test_persistence_integration.py"
 )
@@ -55,6 +59,15 @@ def test_validator_returns_sqlalchemy_url_for_approved_target() -> None:
     assert parsed.drivername == "postgresql+asyncpg"
     assert parsed.host == "localhost"
     assert parsed.database == "airmonitor_persistence_test_guard"
+
+
+def test_validator_accepts_shared_api_disposable_target() -> None:
+    parsed = validate_persistence_database_url(SHARED_API_TEST_URL)
+
+    assert isinstance(parsed, URL)
+    assert parsed.drivername == "postgresql+asyncpg"
+    assert parsed.host == "127.0.0.1"
+    assert parsed.database == "airmonitor_api_test_shared_guard"
 
 
 def test_validator_allows_non_target_connection_options() -> None:

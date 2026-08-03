@@ -71,9 +71,14 @@ def test_validation_errors_never_expose_target_details() -> None:
 
 
 def test_live_suite_never_reads_protected_application_url_variable() -> None:
-    integration_source = (
-        Path(__file__).with_name("test_api_integration.py")
-    ).read_text(encoding="utf-8")
+    integration_sources = [
+        Path(__file__).with_name("test_api_integration.py"),
+        Path(__file__).with_name("api_integration_runtime.py"),
+    ]
+    integration_source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in integration_sources
+    )
     protected_variable = "AIRMONITOR_" + "DATABASE_URL"
 
     assert protected_variable not in integration_source

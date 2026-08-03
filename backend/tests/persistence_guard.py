@@ -11,7 +11,10 @@ from sqlalchemy.exc import ArgumentError
 
 APPROVED_DRIVER = "postgresql+asyncpg"
 APPROVED_HOSTS = frozenset({"localhost", "127.0.0.1"})
-DATABASE_PREFIX = "airmonitor_persistence_test_"
+DATABASE_PREFIXES = (
+    "airmonitor_persistence_test_",
+    "airmonitor_api_test_",
+)
 TARGET_AFFECTING_QUERY_KEYS = frozenset(
     {
         "database",
@@ -71,7 +74,7 @@ def validate_persistence_database_url(value: str) -> URL:
         )
     if (
         parsed.database is None
-        or not parsed.database.startswith(DATABASE_PREFIX)
+        or not parsed.database.startswith(DATABASE_PREFIXES)
     ):
         raise PersistenceTargetError(
             "Persistence integration database name is not approved."
