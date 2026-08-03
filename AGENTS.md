@@ -3,24 +3,62 @@
 
 ## Project structure
 
-AirMonitor v1 at the repository root is stable legacy reference material.
+AirMonitor is an IoT air-quality monitoring system.
 
-Do not modify legacy v1 files unless the user explicitly requests legacy work.
+The repository contains:
 
-AirMonitor v2 lives under backend/ and uses:
+- stable legacy AirMonitor v1 files at the repository root;
+- AirMonitor v2 backend under backend/;
+- documentation under docs/.
 
+Legacy v1 files are reference material only.
+
+Do not modify legacy application files unless the user explicitly requests
+legacy work.
+
+## AirMonitor v2 stack
+
+The v2 backend uses:
+
+- Python 3.13;
 - FastAPI;
 - PostgreSQL;
 - async SQLAlchemy;
 - Alembic;
 - Pydantic;
-- pytest.
+- pytest;
+- Docker;
+- Docker Compose;
+- GitHub Actions.
+
+Current Alembic head:
+
+a75caa2b44f5
+
+## Stable backend capabilities
+
+The backend currently supports:
+
+- device registration and status management;
+- measurement-session lifecycle management;
+- raw-measurement ingestion;
+- session telemetry reads;
+- measurement telemetry reads;
+- strict query validation;
+- opaque keyset pagination;
+- PostgreSQL integration testing;
+- automatic container startup migrations;
+- Docker Compose local development;
+- backend CI.
+
+Do not regress established API or database contracts without an explicitly
+approved task.
 
 ## Branch policy
 
 - main: stable legacy and released repository state;
 - develop: current v2 integration branch;
-- feature/*: isolated feature implementation.
+- feature/*: isolated feature development.
 
 Do not commit directly to main during normal v2 development.
 
@@ -34,21 +72,21 @@ Every pytest command must include:
 
 -B -p no:cacheprovider
 
-Do not use another Python interpreter.
+Do not use a competing local Python interpreter.
 
 ## Source-of-truth policy
 
 Treat the current checkout as authoritative.
 
-Historical plans, prior reports, memory, and chat context are guidance only
+Historical plans, previous reports, memory, and chat context are guidance only
 when they agree with the current repository.
 
-Read relevant specifications, plans, tests, models, migrations, and existing
-conventions completely before editing.
+Read all relevant specifications, models, migrations, tests, configuration,
+and existing conventions before editing.
 
 ## Implementation workflow
 
-For substantial work, use one coherent macro sprint rather than many tiny
+Use coherent macro sprints for substantial features instead of many tiny
 manual phases.
 
 Internally follow:
@@ -65,43 +103,59 @@ Internally follow:
 10. final manual review.
 
 Do not stop after an ordinary intermediate RED or GREEN checkpoint when the
-remaining work is already approved and safely executable.
+remaining approved work can be completed safely.
 
-Stop early only for a genuine safety, scope, or environment blocker.
+Stop early only for a genuine scope, safety, or environment blocker.
 
 ## Testing policy
 
-Before significant changes, establish the current baseline.
+Before substantial work, establish the current baseline.
 
 After changes, run:
 
 - focused tests;
 - relevant regression tests;
-- full offline backend suite;
+- the complete offline backend suite;
+- applicable PostgreSQL integration tests;
 - pip check;
+- Alembic head verification;
 - git diff --check;
 - syntax and import checks;
 - architecture and security scans.
 
-Do not add skips, xfail, fallback implementations, or weakened assertions to
+Do not add skips, xfail, weakened assertions, or fallback implementations to
 hide failures.
 
 ## PostgreSQL safety
 
-Do not connect to an ambiguous, remote, protected, or production database.
+Do not connect to an ambiguous, protected, remote, or production database.
 
-Live integration and migration verification require a dedicated disposable
-local database whose name matches the project test guards.
+Live integration verification requires a dedicated disposable local database
+accepted by the repository guards.
 
 Never print:
 
 - passwords;
-- full database URLs;
+- complete database URLs;
 - tokens;
 - certificates;
 - secret-bearing exception details.
 
 Do not bypass database preflight or reset protections.
+
+## Docker safety
+
+Do not reuse or modify unrelated Docker containers, networks, or volumes.
+
+Verification environments must use unique project names and disposable
+resources.
+
+Runtime containers must remain non-root.
+
+Do not expose PostgreSQL publicly.
+
+Do not retain generated credentials, temporary images, test containers, logs,
+or disposable volumes after verification.
 
 ## Architecture boundaries
 
@@ -111,42 +165,37 @@ Routes must not:
 
 - import repositories;
 - construct SQL;
-- import SQLAlchemy statement builders;
-- manage transactions;
-- perform ownership lookups outside approved services;
+- manage database transactions;
+- perform unapproved ownership lookups;
 - expose internal exceptions.
 
-Services coordinate domain behavior but do not own HTTP concerns.
+Services coordinate application behavior.
 
-Repositories own SQL and persistence access.
+Repositories own persistence queries.
 
 Alembic owns schema transitions.
 
+Container entrypoints own single-container startup migration execution.
+
 ## Telemetry Read API stable contract
 
-The completed read endpoints are:
+Completed endpoints:
 
 GET /api/v1/devices/{device_id}/sessions
 
 GET /api/v1/devices/{device_id}/measurements
 
-They use:
+They retain:
 
 - strict query validation;
 - filter-bound opaque keyset cursors;
-- stable timestamp DESC, id DESC ordering;
-- public limit 1..500;
-- SQL limit + 1;
+- timestamp DESC, id DESC ordering;
+- public limit from 1 through 500;
+- SQL limit plus one;
 - no OFFSET;
 - mandatory device isolation;
 - half-open time ranges;
 - non-disclosing measurement session filters.
-
-The current Alembic head is:
-
-a75caa2b44f5
-
-Do not regress these contracts without an explicitly approved new task.
 
 ## Git restrictions for agents
 
@@ -170,13 +219,14 @@ Keep the Git index unchanged during agent implementation and review.
 
 Do not perform unrelated refactoring.
 
-Do not modify tests merely to accommodate an incorrect implementation.
+Do not alter public contracts without an approved specification.
 
-Do not create agent scratch files inside the repository unless the repository
-already tracks that exact convention.
+Do not edit committed migrations.
 
-Remove temporary containers, files, scripts, logs, and generated secrets after
-verification.
+Do not create agent scratch files inside the repository.
+
+Do not retain temporary scripts, environment files, database dumps, caches, or
+generated secrets.
 
 ## Definition of done
 
@@ -184,9 +234,11 @@ Work is complete only when:
 
 - approved behavior is implemented;
 - focused and full applicable tests pass;
-- migrations are reversible where applicable;
+- migrations remain reversible;
 - OpenAPI and public contracts remain valid;
 - architecture and security boundaries pass;
-- documentation reflects only verified evidence;
-- no secret or temporary artifact remains;
+- deployment instructions are reproducible;
+- documentation reflects verified evidence;
+- no secret or temporary resource remains;
 - final Git status and diff are reported for manual review.
+'@ | Set-Content -Path ".\AGENTS.md" -Encoding UTF8
