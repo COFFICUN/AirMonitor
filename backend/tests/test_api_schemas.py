@@ -20,6 +20,7 @@ from app.schemas.sessions import (
     SessionResponse,
     SessionTransitionRequest,
 )
+from app.schemas import telemetry as telemetry_schemas
 
 
 NOW = datetime(2026, 7, 23, 8, 30, tzinfo=UTC)
@@ -32,6 +33,49 @@ PARTICLE_COUNTER_FIELDS = (
     "pc5_0",
     "pc10",
 )
+SESSION_RESPONSE_FIELDS = {
+    "id",
+    "device_id",
+    "status",
+    "started_at",
+    "ended_at",
+    "latitude",
+    "longitude",
+    "sample_count",
+    "created_at",
+}
+MEASUREMENT_RESPONSE_FIELDS = {
+    "id",
+    "device_id",
+    "session_id",
+    "source_message_id",
+    "measured_at",
+    "received_at",
+    "temperature",
+    "humidity",
+    "pm1",
+    "pm25",
+    "pm10",
+    "pc0_3",
+    "pc0_5",
+    "pc1_0",
+    "pc2_5",
+    "pc5_0",
+    "pc10",
+    "latitude",
+    "longitude",
+    "is_valid",
+    "validation_note",
+    "created_at",
+}
+FORBIDDEN_LIST_FIELDS = {
+    "count",
+    "has_more",
+    "metadata",
+    "offset",
+    "page",
+    "total",
+}
 
 
 @pytest.mark.parametrize(
@@ -455,3 +499,137 @@ def test_measurement_response_has_stable_json_numeric_types() -> None:
     assert isinstance(payload["pc0_3"], int)
     assert payload["latitude"] == 51.1694
     assert isinstance(payload["latitude"], float)
+
+
+def test_telemetry_read_session_list_schema_has_exact_contract() -> None:
+    response_schema = telemetry_schemas.SessionListResponse
+
+    assert set(response_schema.model_fields) == {"items", "next_cursor"}
+    assert response_schema.model_fields["items"].annotation == (
+        list[SessionResponse]
+    )
+    assert response_schema.model_fields["next_cursor"].annotation == (
+        str | None
+    )
+    assert response_schema.model_fields["items"].is_required()
+    assert response_schema.model_fields["next_cursor"].is_required()
+    assert set(SessionResponse.model_fields) == SESSION_RESPONSE_FIELDS
+    assert FORBIDDEN_LIST_FIELDS.isdisjoint(response_schema.model_fields)
+
+
+def test_telemetry_read_session_list_schema_serializes_orm_items() -> None:
+    session = MeasurementSession(
+        id=21,
+        device_id=11,
+        status="completed",
+        started_at=NOW,
+        ended_at=NOW,
+        latitude=51.1694,
+        longitude=71.4491,
+        sample_count=17,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+    response = telemetry_schemas.SessionListResponse.model_validate(
+        {"items": [session], "next_cursor": "opaque-session-cursor"}
+    )
+    payload = response.model_dump(mode="json")
+
+    assert set(payload) == {"items", "next_cursor"}
+    assert set(payload["items"][0]) == SESSION_RESPONSE_FIELDS
+    assert payload["items"][0]["started_at"] == (
+        "2026-07-23T08:30:00Z"
+    )
+    assert payload["items"][0]["latitude"] == 51.1694
+    assert isinstance(payload["items"][0]["latitude"], float)
+    assert payload["items"][0]["sample_count"] == 17
+    assert isinstance(payload["items"][0]["sample_count"], int)
+    assert payload["next_cursor"] == "opaque-session-cursor"
+
+
+def test_telemetry_read_session_list_schema_accepts_empty_page() -> None:
+    response = telemetry_schemas.SessionListResponse(
+        items=[],
+        next_cursor=None,
+    )
+
+    assert response.model_dump(mode="json") == {
+        "items": [],
+        "next_cursor": None,
+    }
+
+
+def test_telemetry_read_measurement_list_schema_has_exact_contract() -> None:
+    response_schema = telemetry_schemas.MeasurementListResponse
+
+    assert set(response_schema.model_fields) == {"items", "next_cursor"}
+    assert response_schema.model_fields["items"].annotation == (
+        list[MeasurementResponse]
+    )
+    assert response_schema.model_fields["next_cursor"].annotation == (
+        str | None
+    )
+    assert response_schema.model_fields["items"].is_required()
+    assert response_schema.model_fields["next_cursor"].is_required()
+    assert (
+        set(MeasurementResponse.model_fields)
+        == MEASUREMENT_RESPONSE_FIELDS
+    )
+    assert FORBIDDEN_LIST_FIELDS.isdisjoint(response_schema.model_fields)
+
+
+def test_telemetry_read_measurement_list_schema_serializes_orm_items(
+) -> None:
+    measurement = RawMeasurement(
+        id=31,
+        device_id=11,
+        session_id=21,
+        source_message_id="message-31",
+        measured_at=NOW,
+        received_at=NOW,
+        temperature=21.5,
+        humidity=44.25,
+        pm1=3.0,
+        pm25=7.5,
+        pm10=12.0,
+        pc0_3=100,
+        pc0_5=90,
+        pc1_0=80,
+        pc2_5=70,
+        pc5_0=60,
+        pc10=50,
+        latitude=51.1694,
+        longitude=71.4491,
+        is_valid=True,
+        validation_note=None,
+        created_at=NOW,
+    )
+
+    response = telemetry_schemas.MeasurementListResponse.model_validate(
+        {"items": [measurement], "next_cursor": "opaque-measurement-cursor"}
+    )
+    payload = response.model_dump(mode="json")
+
+    assert set(payload) == {"items", "next_cursor"}
+    assert set(payload["items"][0]) == MEASUREMENT_RESPONSE_FIELDS
+    assert payload["items"][0]["measured_at"] == (
+        "2026-07-23T08:30:00Z"
+    )
+    assert payload["items"][0]["pm25"] == 7.5
+    assert isinstance(payload["items"][0]["pm25"], float)
+    assert payload["items"][0]["pc0_3"] == 100
+    assert isinstance(payload["items"][0]["pc0_3"], int)
+    assert payload["next_cursor"] == "opaque-measurement-cursor"
+
+
+def test_telemetry_read_measurement_list_schema_accepts_empty_page() -> None:
+    response = telemetry_schemas.MeasurementListResponse(
+        items=[],
+        next_cursor=None,
+    )
+
+    assert response.model_dump(mode="json") == {
+        "items": [],
+        "next_cursor": None,
+    }

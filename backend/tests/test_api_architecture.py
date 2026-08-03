@@ -17,9 +17,31 @@ FORBIDDEN_ROUTE_CALLS = {
     "begin",
     "begin_nested",
     "commit",
+    "delete",
     "execute",
     "flush",
+    "limit",
+    "offset",
+    "order_by",
     "rollback",
+    "select",
+    "where",
+}
+TELEMETRY_ROUTE_CONTRACTS = {
+    "sessions.py": (
+        "list_device_sessions",
+        "SessionListResponse",
+        "strict_session_query_parameters",
+        "resolve_session_read_request",
+        "get_session_telemetry_query_service",
+    ),
+    "measurements.py": (
+        "list_device_measurements",
+        "MeasurementListResponse",
+        "strict_measurement_query_parameters",
+        "resolve_measurement_read_request",
+        "get_measurement_telemetry_query_service",
+    ),
 }
 
 
@@ -31,6 +53,14 @@ def _imports(tree: ast.AST) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
             imported.add(node.module)
     return imported
+
+
+def _call_name(node: ast.Call) -> str | None:
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    if isinstance(node.func, ast.Attribute):
+        return node.func.attr
+    return None
 
 
 def test_route_sources_do_not_cross_persistence_boundaries() -> None:
@@ -56,11 +86,15 @@ def test_route_sources_do_not_cross_persistence_boundaries() -> None:
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr in FORBIDDEN_ROUTE_CALLS
+                and _call_name(node) in (
+                    FORBIDDEN_ROUTE_CALLS | {"AsyncSession"}
+                )
             ):
                 violations.append(
-                    f"{endpoint_file.name}:{node.lineno}:{node.func.attr}"
+                    (
+                        f"{endpoint_file.name}:{node.lineno}:"
+                        f"{_call_name(node)}"
+                    )
                 )
             if (
                 isinstance(node, ast.ExceptHandler)
@@ -75,6 +109,75 @@ def test_route_sources_do_not_cross_persistence_boundaries() -> None:
                 )
 
     assert violations == []
+
+
+def test_telemetry_read_routes_use_concrete_service_boundaries() -> None:
+    for endpoint_name, contract in TELEMETRY_ROUTE_CONTRACTS.items():
+        (
+            function_name,
+            response_model,
+            strict_dependency,
+            resolver,
+            service_provider,
+        ) = contract
+        endpoint_path = ENDPOINT_DIRECTORY / endpoint_name
+        tree = ast.parse(endpoint_path.read_text(encoding="utf-8"))
+        matching_functions = [
+            node
+            for node in tree.body
+            if isinstance(node, ast.AsyncFunctionDef)
+            and node.name == function_name
+        ]
+        assert len(matching_functions) == 1
+        route_function = matching_functions[0]
+        names = {
+            node.id
+            for node in ast.walk(route_function)
+            if isinstance(node, ast.Name)
+        }
+        assert {
+            response_model,
+            strict_dependency,
+            resolver,
+            service_provider,
+        } <= names
+
+        get_decorators = [
+            decorator
+            for decorator in route_function.decorator_list
+            if isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.func.attr == "get"
+        ]
+        assert len(get_decorators) == 1
+        decorator_keywords = {
+            keyword.arg: keyword.value
+            for keyword in get_decorators[0].keywords
+            if keyword.arg is not None
+        }
+        declared_response_model = decorator_keywords["response_model"]
+        assert isinstance(declared_response_model, ast.Name)
+        assert declared_response_model.id == response_model
+
+        dependency_targets = {
+            call.args[0].id
+            for call in ast.walk(route_function)
+            if isinstance(call, ast.Call)
+            and _call_name(call) == "Depends"
+            and call.args
+            and isinstance(call.args[0], ast.Name)
+        }
+        assert dependency_targets == {
+            strict_dependency,
+            resolver,
+            service_provider,
+        }
+
+        assert route_function.returns is not None
+        return_contract = ast.unparse(route_function.returns)
+        assert return_contract == response_model
+        assert "Any" not in return_contract
+        assert "dict" not in return_contract
 
 
 def test_query_services_use_repositories_without_write_operations() -> None:
