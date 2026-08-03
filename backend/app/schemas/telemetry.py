@@ -9,9 +9,12 @@ from pydantic import Field, model_validator
 
 from app.schemas._base import (
     AwareDatetime,
+    ORMResponseModel,
     PositivePostgresInteger,
     RequestModel,
 )
+from app.schemas.measurements import MeasurementResponse
+from app.schemas.sessions import SessionResponse
 
 
 class SessionListQuery(RequestModel):
@@ -44,6 +47,16 @@ class MeasurementListQuery(RequestModel):
         return self
 
 
+class SessionListResponse(ORMResponseModel):
+    items: list[SessionResponse]
+    next_cursor: str | None
+
+
+class MeasurementListResponse(ORMResponseModel):
+    items: list[MeasurementResponse]
+    next_cursor: str | None
+
+
 def _as_optional_utc(value: datetime | None) -> datetime | None:
     return None if value is None else value.astimezone(UTC)
 
@@ -56,4 +69,9 @@ def _require_ordered_range(
         raise ValueError("the lower time bound must not exceed the upper")
 
 
-__all__ = ["MeasurementListQuery", "SessionListQuery"]
+__all__ = [
+    "MeasurementListQuery",
+    "MeasurementListResponse",
+    "SessionListQuery",
+    "SessionListResponse",
+]
