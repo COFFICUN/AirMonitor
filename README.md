@@ -1,64 +1,40 @@
 # AirMonitor
 
 AirMonitor is a portable air-quality and microclimate monitoring project built
-around an M5Stack/ESP32 device, a PMSA003 particulate sensor, and an SHT30
-temperature and humidity sensor.
+around an M5Stack/ESP32, a PMSA003 particulate sensor, and an SHT30 temperature
+and humidity sensor.
 
-The repository contains two deliberately separate application generations:
+The repository intentionally contains two application generations:
 
-- **AirMonitor v1** is the stable legacy diploma implementation at the
-  repository root. It uses Flask, SQLite, the original firmware, and the
-  legacy browser dashboard.
-- **AirMonitor v2** is the active backend under `backend/`. It uses FastAPI,
-  PostgreSQL, SQLAlchemy asyncio, Alembic, Pydantic settings, and pytest.
+- **AirMonitor v1** is the stable legacy diploma application at the repository
+  root. It uses Flask, SQLite, the original firmware, and the legacy browser UI.
+- **AirMonitor v2** is the active backend under `backend/`. It uses Python 3.13,
+  FastAPI, PostgreSQL, async SQLAlchemy, Alembic, Pydantic, and pytest.
 
-The `main` branch is the stable legacy line. AirMonitor v2 development is based
-on `develop` and uses focused feature, fix, test, and documentation branches.
-Root v1 files remain reference material unless a change explicitly targets
-the legacy application.
+Root v1 application files are reference material. Current development targets
+the v2 backend and does not silently migrate or rewrite the legacy application.
 
-## Repository layout
+## Current v2 status
 
-```text
-AirMonitor/
-├── app.py                    # AirMonitor v1 Flask application
-├── index.html                # AirMonitor v1 browser dashboard
-├── init_db.py                # AirMonitor v1 SQLite initialization
-├── schema.sql                # AirMonitor v1 SQLite schema
-├── test1_final.ino           # M5Stack/ESP32 firmware
-├── secrets.example.h         # Firmware credential template
-├── requirements.txt          # AirMonitor v1 requirements
-├── backend/
-│   ├── app/                  # AirMonitor v2 FastAPI application
-│   ├── alembic/              # PostgreSQL migrations
-│   ├── tests/                # Offline and opt-in integration tests
-│   ├── .env.example          # v2 settings template
-│   ├── requirements.txt      # v2 runtime requirements
-│   └── requirements-dev.txt  # v2 test requirements
-└── docs/
-    ├── reviews/              # Audit and verification records
-    └── specs/                # Approved future contracts
-```
+The backend currently supports:
 
-## Hardware context
+- service health;
+- device creation, retrieval, activation, and deactivation;
+- measurement-session start, active lookup, completion, and cancellation;
+- raw-measurement ingestion;
+- session and raw-measurement history reads;
+- strict query validation and opaque keyset pagination;
+- guarded disposable-PostgreSQL integration testing;
+- automatic Alembic migration in the container startup path;
+- a local Docker Compose stack and backend GitHub Actions CI.
 
-The physical monitor combines:
+The OpenAPI contract is version 3.1.0 with 11 operations: 10 under `/api/v1`
+and one under `/health`. All 11 operation IDs are unique. The sole Alembic head
+is `a75caa2b44f5`.
 
-| Component | Role |
-|---|---|
-| M5Stack/ESP32 | Controller, display, and Wi-Fi communication |
-| PMSA003 | PM1, PM2.5, PM10, and particle-count measurements |
-| SHT30 | Temperature and relative-humidity measurements |
-| Portable power source | Mobile monitoring |
+## Architecture
 
-AirMonitor is intended for mobile collection of air-quality and local
-microclimate readings. The legacy firmware and UI remain at the repository
-root. AirMonitor v2 currently provides the backend write and lifecycle
-foundation; it does not yet replace every v1 dashboard or analytical feature.
-
-## AirMonitor v2 architecture
-
-AirMonitor v2 is a modular asynchronous API:
+The v2 request path is deliberately layered:
 
 ```text
 FastAPI route
@@ -69,285 +45,436 @@ FastAPI route
   -> PostgreSQL
 ```
 
-- The FastAPI application owns its database engine and async session factory.
+- The FastAPI application owns its async engine and session factory.
 - Each database-backed request receives one request-scoped `AsyncSession`.
 - Query services are read-only; write services own transaction boundaries.
-- SQLAlchemy repositories issue parameterized statements and never own
-  commits or rollbacks.
-- The FastAPI lifespan disposes the application-owned async engine at
-  shutdown.
-- Alembic owns PostgreSQL schema evolution. The current sole head is
-  `a4f9c2e7d1b6`.
-- Pydantic validates request bodies and environment-backed settings.
-- pytest covers schemas, services, repositories, routes, errors, migrations,
-  application composition, and guarded integration behavior.
+- Repositories issue parameterized statements and do not commit or roll back.
+- The FastAPI lifespan disposes the application-owned engine at shutdown.
+- Alembic owns schema evolution for `devices`, `device_runtime_state`,
+  `measurement_sessions`, and `raw_measurements`.
+- Telemetry history uses stable descending keyset order and bounded
+  `limit + 1` repository reads, never offset pagination.
 
-The implemented v2 domain uses four PostgreSQL tables:
+The local container path is:
 
-- `devices`
-- `device_runtime_state`
-- `measurement_sessions`
-- `raw_measurements`
+```text
+Docker Compose
+  -> PostgreSQL 18 healthcheck
+  -> API entrypoint readiness check
+  -> alembic upgrade head
+  -> one non-root Uvicorn process
+  -> /health container healthcheck
+```
 
-## Current v2 capabilities
+For the current MVP, one API container owns startup migration. Do not scale the
+API beyond one container until migration ownership moves to a separate one-off
+job.
 
-The current backend implements:
+## API operations
 
-- service health;
-- device creation and retrieval;
-- device activation and deactivation;
-- measurement-session start and active-session retrieval;
-- session completion and cancellation;
-- raw measurement ingestion;
-- stable `ErrorResponse` envelopes for validation, domain, framework, and
-  unexpected failures;
-- timezone-aware timestamp normalization to UTC;
-- rejection of measurements before their session start;
-- rejection of terminal timestamps before the session start or latest stored
-  measurement;
-- rejection of non-finite PM values;
-- PostgreSQL `INTEGER` boundaries for public device IDs and particle counts;
-- application-owned async engine/session lifecycle.
-
-Raw measurement history and session history list endpoints are **not currently
-implemented**. Their approved future design is documented in
-`docs/specs/telemetry-read-api.md`.
-
-## Current v2 OpenAPI operations
-
-The guarded offline OpenAPI schema is version `3.1.0` and currently contains
-exactly nine operations: eight under `/api/v1` and one health operation.
-Operation IDs are unique.
-
-| Method | Path | Operation ID | Purpose |
-|---|---|---|---|
-| `POST` | `/api/v1/devices` | `create_device` | Create a device and runtime state |
-| `GET` | `/api/v1/devices/{device_id}` | `get_device` | Retrieve a device |
-| `PATCH` | `/api/v1/devices/{device_id}/status` | `set_device_status` | Activate or deactivate a device |
-| `POST` | `/api/v1/devices/{device_id}/sessions` | `start_measurement_session` | Start a measurement session |
-| `GET` | `/api/v1/devices/{device_id}/sessions/active` | `get_active_measurement_session` | Retrieve the active session |
-| `POST` | `/api/v1/devices/{device_id}/sessions/active/complete` | `complete_active_measurement_session` | Complete the active session |
-| `POST` | `/api/v1/devices/{device_id}/sessions/active/cancel` | `cancel_active_measurement_session` | Cancel the active session |
-| `POST` | `/api/v1/devices/{device_id}/measurements` | `record_raw_measurement` | Store one raw reading |
-| `GET` | `/health` | `get_health_health_get` | Return service health |
-
-Every current v2 path is fixed in source. There is no supported configurable
-API-prefix setting.
-
-## Supported v2 settings
-
-`backend/app/core/config.py` defines the complete supported settings contract.
-Settings use the `AIRMONITOR_` environment prefix and may be loaded from
-`backend/.env`.
-
-| Environment variable | Settings field | Type/default or policy |
+| Method | Path | Operation ID |
 |---|---|---|
-| `AIRMONITOR_APP_NAME` | `app_name` | String; default `AirMonitor API` |
-| `AIRMONITOR_APP_VERSION` | `app_version` | String; default `2.0.0` |
-| `AIRMONITOR_SERVICE_NAME` | `service_name` | String; default `airmonitor-api` |
-| `AIRMONITOR_ENVIRONMENT` | `environment` | `development`, `test`, or `production`; default `development` |
-| `AIRMONITOR_DEBUG` | `debug` | Boolean; default `false`; forbidden in production |
-| `AIRMONITOR_DATABASE_URL` | `database_url` | PostgreSQL with the `postgresql+asyncpg` driver; configure locally without committing it |
-| `AIRMONITOR_DATABASE_ECHO` | `database_echo` | Boolean; default `false`; forbidden in production |
-| `AIRMONITOR_DATABASE_POOL_PRE_PING` | `database_pool_pre_ping` | Boolean; default `true` |
+| `GET` | `/health` | `get_health_health_get` |
+| `POST` | `/api/v1/devices` | `create_device` |
+| `GET` | `/api/v1/devices/{device_id}` | `get_device` |
+| `PATCH` | `/api/v1/devices/{device_id}/status` | `set_device_status` |
+| `POST` | `/api/v1/devices/{device_id}/sessions` | `start_measurement_session` |
+| `GET` | `/api/v1/devices/{device_id}/sessions` | `list_device_sessions` |
+| `GET` | `/api/v1/devices/{device_id}/sessions/active` | `get_active_measurement_session` |
+| `POST` | `/api/v1/devices/{device_id}/sessions/active/complete` | `complete_active_measurement_session` |
+| `POST` | `/api/v1/devices/{device_id}/sessions/active/cancel` | `cancel_active_measurement_session` |
+| `POST` | `/api/v1/devices/{device_id}/measurements` | `record_raw_measurement` |
+| `GET` | `/api/v1/devices/{device_id}/measurements` | `list_device_measurements` |
 
-Production settings must identify one explicit non-default database target and
-must not use ambiguous target overrides. SQLAlchemy hides parameter values in
-engine errors and logs. No additional API-prefix setting is supported.
+Telemetry read details, cursor semantics, and index guarantees are documented
+in [`docs/specs/telemetry-read-api.md`](docs/specs/telemetry-read-api.md).
 
-## AirMonitor v2 setup on Windows
+## Hardware
+
+| Component | Role |
+|---|---|
+| M5Stack/ESP32 | Controller, display, and Wi-Fi communication |
+| PMSA003 | PM1, PM2.5, PM10, and particle-count measurements |
+| SHT30 | Temperature and relative-humidity measurements |
+| Portable power source | Mobile monitoring |
+
+The original firmware remains at the repository root. Firmware changes and a
+v2 browser frontend are outside the current backend production-readiness scope.
+
+## Repository layout
+
+```text
+AirMonitor/
+|-- app.py                         # v1 Flask application
+|-- index.html                     # v1 browser UI
+|-- init_db.py, schema.sql         # v1 SQLite setup
+|-- test1_final.ino                # ESP32 firmware
+|-- backend/
+|   |-- app/                       # v2 FastAPI application
+|   |-- alembic/                   # PostgreSQL migrations
+|   |-- tests/                     # offline and guarded live tests
+|   |-- Dockerfile                 # canonical runtime image
+|   |-- docker-entrypoint.sh       # readiness, migration, Uvicorn
+|   |-- .dockerignore
+|   |-- .env.example               # host-side Python template
+|   |-- requirements.txt           # runtime dependencies
+|   `-- requirements-dev.txt       # test dependencies
+|-- compose.yaml                   # local api + db stack
+|-- .env.example                   # Compose interpolation template
+|-- .github/workflows/backend-ci.yml
+`-- docs/
+    |-- specs/
+    `-- reviews/
+```
+
+## Prerequisites
+
+Choose either the Docker path or the local Python path.
+
+For Docker development:
+
+- Docker Desktop or Docker Engine with `docker compose`;
+- an available local TCP port 8000, or another port set in `.env`.
+
+For host-side development:
+
+- Python 3.13;
+- PostgreSQL 18 or another currently compatible PostgreSQL server;
+- a dedicated application database and role.
+
+## Docker Compose quick start
 
 Run these commands from the repository root.
 
-### 1. Create the Python environment
+1. Create the ignored local Compose environment file.
 
-AirMonitor v2 supports Python 3.13. The verified development environment uses
-Python 3.13.7.
+   PowerShell:
 
-```powershell
-cd .\backend
-py -3.13 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+   ```powershell
+   Copy-Item .\.env.example .\.env
+   ```
+
+   POSIX shell:
+
+   ```sh
+   cp .env.example .env
+   ```
+
+2. Edit `.env` and replace `POSTGRES_PASSWORD` with a long, local-development
+   password. Keep it URL-safe because Compose uses the same value in the async
+   database URL. Do not commit `.env`.
+
+3. Validate and start the stack.
+
+   ```sh
+   docker compose config --quiet
+   docker compose up --build
+   ```
+
+Compose starts `db`, waits for PostgreSQL health, runs `alembic upgrade head`
+inside `api`, and starts Uvicorn only if migration succeeds. The API image is
+built from `backend/Dockerfile` and runs as a dedicated non-root user.
+
+The database has no published host port. The unauthenticated API is bound only
+to loopback by default:
+
+- health: <http://127.0.0.1:8000/health>
+- OpenAPI JSON: <http://127.0.0.1:8000/openapi.json>
+- Swagger UI: <http://127.0.0.1:8000/docs>
+
+Stop containers while retaining the named development database volume:
+
+```sh
+docker compose down
 ```
 
-Use `requirements.txt` instead when only runtime dependencies are needed.
-The repository currently has no machine-readable Python-version pin or
-transitive lock file.
+Delete this Compose project's development data only when an intentional clean
+database is required:
 
-### 2. Prepare PostgreSQL
-
-Using an administrator connection outside the application:
-
-1. create a dedicated application role;
-2. create a PostgreSQL database owned by that role;
-3. grant only the privileges required by the application and migrations;
-4. keep the role password and connection URL outside Git.
-
-Do not reuse an integration-test database as an application database.
-
-### 3. Configure the environment
-
-```powershell
-Copy-Item .\.env.example .\.env
+```sh
+docker compose down --volumes
 ```
 
-Edit `.env` locally and set the eight supported variables listed above. At
-minimum, replace the development database configuration with the dedicated
-target prepared for this environment. Treat `.env.example` only as a template.
+The second command is destructive for the Compose development volume. It does
+not target an independently managed host PostgreSQL database.
 
-### 4. Apply migrations
+## Environment configuration
+
+### Compose interpolation
+
+The root `.env.example` defines only local Compose inputs:
+
+| Variable | Purpose |
+|---|---|
+| `POSTGRES_DB` | Development database initialized in the `db` service |
+| `POSTGRES_USER` | Development database role initialized in the `db` service |
+| `POSTGRES_PASSWORD` | Required placeholder; replace in ignored `.env` |
+| `AIRMONITOR_API_PORT` | Loopback host port mapped to container port 8000 |
+
+Compose constructs the application URL with hostname `db`, the Compose service
+name. Host-side Python must use `localhost` or another host-reachable database
+address instead.
+
+### Backend settings
+
+`backend/app/core/config.py` defines the application settings contract. Values
+use the `AIRMONITOR_` prefix and may be loaded from `backend/.env`.
+
+| Environment variable | Default or policy |
+|---|---|
+| `AIRMONITOR_APP_NAME` | `AirMonitor API` |
+| `AIRMONITOR_APP_VERSION` | `2.0.0` |
+| `AIRMONITOR_SERVICE_NAME` | `airmonitor-api` |
+| `AIRMONITOR_ENVIRONMENT` | `development`, `test`, or `production` |
+| `AIRMONITOR_DEBUG` | `false`; forbidden in production |
+| `AIRMONITOR_DATABASE_URL` | Required async `postgresql+asyncpg` target for real use |
+| `AIRMONITOR_DATABASE_ECHO` | `false`; forbidden in production |
+| `AIRMONITOR_DATABASE_POOL_PRE_PING` | `true` |
+
+Uvicorn receives `UVICORN_HOST` and `UVICORN_PORT` from the real container
+environment. They are server-process settings, not duplicate application
+settings.
+
+For local Python development, copy `backend/.env.example` to
+`backend/.env` and replace all database placeholders. Never commit the real
+file.
+
+## Local Python development
+
+The commands below begin at the repository root and use PowerShell.
+
+Create the environment and install development dependencies:
 
 ```powershell
-python -B -m alembic -c alembic.ini upgrade head
+py -3.13 -m venv .\backend\.venv
+& .\backend\.venv\Scripts\python.exe -m pip install --upgrade pip
+& .\backend\.venv\Scripts\python.exe -m pip install -r .\backend\requirements-dev.txt
+Copy-Item .\backend\.env.example .\backend\.env
 ```
 
-The expected head is `a4f9c2e7d1b6`.
-
-### 5. Start the API
+Edit `backend/.env` and replace the database placeholders. Then migrate and
+start the API from the backend working directory:
 
 ```powershell
-python -B -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+Push-Location .\backend
+& .\.venv\Scripts\python.exe -B -m alembic upgrade head
+& .\.venv\Scripts\python.exe -B -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Development-only reload can be enabled with Uvicorn's `--reload` option. Do
-not use reload mode as a production deployment strategy.
-
-### 6. Verify health
+Stop Uvicorn with Ctrl+C, then return to the repository root:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8000/health
+Pop-Location
 ```
 
-The response contains `status`, `service`, and `version`. Health is a liveness
-check; it does not prove database readiness.
-
-## Tests and verification
-
-Run tests from `backend/`. Every pytest invocation must disable bytecode cache
-effects and pytest's cache provider.
-
-Focused offline checks:
+Reload mode is for local development only:
 
 ```powershell
-python -B -m pytest -q -p no:cacheprovider tests/test_health.py tests/test_api_openapi.py
+Push-Location .\backend
+& .\.venv\Scripts\python.exe -B -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Complete offline suite:
+Stop Uvicorn with Ctrl+C and run `Pop-Location` when finished.
+
+## Alembic migrations
+
+Run migration commands from `backend/` so application imports resolve using the
+same convention as container startup:
 
 ```powershell
-python -B -m pytest -q -p no:cacheprovider
+Push-Location .\backend
+& .\.venv\Scripts\python.exe -B -m alembic heads
+& .\.venv\Scripts\python.exe -B -m alembic upgrade head
+Pop-Location
+```
+
+The expected single head is `a75caa2b44f5`. Container startup owns migration
+for the one-container MVP. A migration failure terminates the entrypoint, so the
+API never starts and never becomes healthy.
+
+Do not downgrade, truncate, drop, or recreate a real application database as a
+test. Downgrade verification belongs only on a disposable target or in offline
+SQL generation.
+
+## Tests
+
+Every pytest command must disable bytecode creation and pytest's cache provider.
+Run from the repository root:
+
+```powershell
+Push-Location .\backend
+& .\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider
+Pop-Location
+```
+
+Focused health, OpenAPI, and infrastructure contracts:
+
+```powershell
+Push-Location .\backend
+& .\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider tests/test_health.py tests/test_api_openapi.py tests/test_production_readiness_infrastructure.py
+Pop-Location
 ```
 
 Dependency consistency:
 
 ```powershell
-python -B -m pip check
+& .\backend\.venv\Scripts\python.exe -B -m pip check
 ```
 
-The offline suite skips live PostgreSQL modules unless their dedicated opt-ins
-are supplied.
+Ordinary offline runs must leave all live integration variables unset. The two
+live modules then skip by design.
 
-### Live integration safety
+### Guarded PostgreSQL integration tests
 
-Live integration is explicit opt-in only and must use dedicated, disposable
-local PostgreSQL databases. Never point these suites at the protected
-application or development database.
+Live suites are destructive to their dedicated disposable test database: they
+verify the expected schema/head and truncate all four application tables before
+and after the suite. Never point them at an application or development target.
 
-| Suite | Activation | Required database-name prefix |
+Accepted targets use the asyncpg driver, `localhost` or `127.0.0.1`, and an
+approved database-name prefix:
+
+| Suite | Variable | Required database-name prefix |
 |---|---|---|
-| Persistence | Set `AIRMONITOR_RUN_PERSISTENCE_INTEGRATION=1` and securely provide `AIRMONITOR_TEST_DATABASE_URL` | `airmonitor_persistence_test_` |
-| API | Securely provide `AIRMONITOR_API_TEST_DATABASE_URL` | `airmonitor_api_test_` |
+| API | `AIRMONITOR_API_TEST_DATABASE_URL` | `airmonitor_api_test_` |
+| Persistence | `AIRMONITOR_TEST_DATABASE_URL` plus `AIRMONITOR_RUN_PERSISTENCE_INTEGRATION=1` | `airmonitor_persistence_test_` or `airmonitor_api_test_` |
 
-Both guards allow only the `postgresql+asyncpg` driver and hosts `localhost`
-or `127.0.0.1`. Target-changing query parameters and unapproved database names
-are rejected before engine construction.
-
-After the variables are configured through a secure local mechanism, run only
-the intended module:
+After securely providing a migrated disposable target, run:
 
 ```powershell
-python -B -m pytest -q -p no:cacheprovider tests/test_persistence_integration.py
-python -B -m pytest -q -p no:cacheprovider tests/test_api_integration.py
-```
+if ([string]::IsNullOrWhiteSpace($env:AIRMONITOR_API_TEST_DATABASE_URL)) {
+    throw "Set the dedicated API integration database URL first."
+}
+if ([string]::IsNullOrWhiteSpace($env:AIRMONITOR_TEST_DATABASE_URL)) {
+    throw "Set the dedicated persistence integration database URL first."
+}
 
-Each activated suite:
+Push-Location .\backend
+try {
+    & .\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider tests/test_api_integration.py
+    if ($LASTEXITCODE -ne 0) {
+        throw "API integration tests failed."
+    }
 
-1. validates the target;
-2. verifies the expected schema and Alembic revision;
-3. truncates all application tables before the suite;
-4. uses `RESTART IDENTITY`;
-5. verifies the initial application tables are empty;
-6. truncates all application tables again during final cleanup;
-7. disposes the engine.
-
-The reset deliberately does not use `CASCADE`, create or drop a database, or
-create or drop a schema. The completed live verification is recorded in
-`docs/reviews/sprint-8-c4b-live-verification.md`.
-
-## Error and validation contract
-
-v2 errors use:
-
-```json
-{
-  "error": {
-    "code": "request_validation_error",
-    "message": "Request validation failed.",
-    "details": null
-  }
+    $env:AIRMONITOR_RUN_PERSISTENCE_INTEGRATION = "1"
+    & .\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider tests/test_persistence_integration.py
+    if ($LASTEXITCODE -ne 0) {
+        throw "Persistence integration tests failed."
+    }
+} finally {
+    Remove-Item Env:AIRMONITOR_RUN_PERSISTENCE_INTEGRATION -ErrorAction SilentlyContinue
+    Pop-Location
 }
 ```
 
-The concrete code and message vary by failure, but the `ErrorResponse` shape
-is stable. Validation failures return safe `422` responses, domain conflicts
-return safe `409` responses, missing resources return safe `404` responses,
-and unexpected errors return a generic `500` response when debug mode is
-disabled.
+The repository guards reject remote hosts, the protected database name,
+unapproved prefixes, target-changing query parameters, and unavailable targets
+without exposing connection details.
 
-All public identifiers mapped to PostgreSQL `INTEGER` must be greater than
-zero and no greater than `2,147,483,647`. Particle counters are non-negative
-and have the same maximum.
+## Continuous integration
 
-## Deployment and feature limitations
+`.github/workflows/backend-ci.yml` runs on relevant pull requests and pushes to
+`develop`, with workflow-level `contents: read` permission and superseded-run
+cancellation.
 
-AirMonitor v2 currently has **no authentication or authorization**. Public
-internet exposure is not approved. Use it only on a private or otherwise
-trusted network until a dedicated authentication, authorization, and
-rate-limiting phase is complete.
+Its independent jobs are:
 
-The following are not implemented v2 capabilities:
+- **Offline backend tests:** Python 3.13, runtime/development dependencies,
+  `pip check`, exact Alembic-head validation, and the complete offline suite
+  with live variables explicitly empty.
+- **Guarded PostgreSQL integration:** disposable PostgreSQL 18.4 with a health
+  gate, Alembic migration, guard/reset checks, API integration, and persistence
+  integration against one approved API-prefixed test database.
+- **Backend image build:** builds `backend/Dockerfile`, does not push it, and
+  inspects the configured runtime user to reject root execution.
 
-- Docker or Docker Compose deployment;
-- CI/CD;
-- Redis, Celery, MQTT, or WebSockets;
-- v2 aggregation, AQI, NowCast, or forecast APIs;
-- telemetry/session history endpoints;
-- map clustering, CSV export, or retention automation;
-- a v2 browser dashboard.
+GitHub-hosted CI cannot be executed locally. The same dependency, test,
+migration, Docker build, and Compose smoke commands are reproducible locally.
 
-Some of these capabilities exist in the preserved v1 application. That does
-not make them part of the v2 API contract.
+## Troubleshooting
 
-## Git and secret safety
+### Compose reports a missing variable
 
-- Do not commit `.env`; use `.env.example` only as a template.
-- Do not commit passwords, database URLs, database dumps, or SQLite data.
-- Do not commit certificates, private keys, firmware credentials, or
-  `secrets.h`.
-- Keep legacy root assets unchanged unless a task explicitly targets v1.
-- Do not use live integration variables in ordinary offline test runs.
+Copy the root `.env.example` to `.env` and replace the password placeholder.
+Compose intentionally refuses to invent database credentials.
 
-## Documentation status
+### The API cannot reach PostgreSQL
 
-- `docs/reviews/sprint-8-full-codebase-audit.md` records the original audit.
-- `docs/reviews/sprint-8-final-verification.md` records the pre-C4 closure
-  state.
-- `docs/reviews/sprint-8-c4b-live-verification.md` records the completed
-  disposable PostgreSQL verification.
-- `docs/specs/telemetry-read-api.md` defines the future read API contract
-  without claiming it is implemented.
+- In Compose, the database hostname is `db`, not `localhost`.
+- From host-side Python, use a host-reachable address such as `localhost`, not
+  the Compose-only service name.
+- Check `docker compose ps` and sanitized API/database logs.
+
+### Credentials changed but the database still uses old values
+
+PostgreSQL initialization variables apply only to an empty data directory. If
+the Compose data is disposable, stop the stack and intentionally run
+`docker compose down --volumes`, then start again. Do not use
+that cleanup pattern on independently managed databases.
+
+### The API container exits before serving requests
+
+Inspect `docker compose logs api`. A bounded database-readiness
+failure or Alembic failure intentionally prevents Uvicorn from starting. Fix
+the target or migration problem; do not bypass the entrypoint.
+
+### Port 8000 is already in use
+
+Set `AIRMONITOR_API_PORT` in the root `.env` to another unused host port. The
+container still listens on port 8000.
+
+## Security and operational boundaries
+
+- AirMonitor v2 has no authentication, authorization, or rate limiting.
+  Public internet exposure is not approved.
+- The Compose API port is loopback-bound and PostgreSQL is not published.
+- The API container runs as UID/GID 10001 and enables `no-new-privileges` in
+  Compose.
+- Real `.env` files, credentials, certificates, database files, logs, caches,
+  and local virtual environments are excluded from Git and/or Docker context.
+- Database values are passed through environment variables for this local
+  development stack. A production deployment must use its platform's secret
+  manager and a separately designed migration owner.
+- `/health` is process liveness. Container startup proves migrations completed,
+  but the endpoint does not continuously query PostgreSQL.
+
+## Current limitations and roadmap
+
+Not implemented in v2:
+
+- authentication, authorization, and rate limiting;
+- a v2 browser frontend;
+- HTTPS termination or a reverse proxy;
+- cloud deployment, Kubernetes, or multi-replica migration coordination;
+- monitoring-platform integration and background workers;
+- Redis, MQTT, WebSockets, retention automation, CSV export, or forecasting
+  changes.
+
+Next production-facing work should design identity/access control first, then
+external secret management, separated migration ownership, HTTPS/reverse proxy
+deployment, and observability. Frontend v2 work remains a separate product
+phase.
+
+## Technical highlights
+
+- Typed environment configuration with production-only safety validation.
+- Async request-scoped persistence with explicit service transaction ownership.
+- Composite same-device foreign keys and reversible Alembic migrations.
+- Opaque filter-bound keyset cursors and PostgreSQL-backed index-plan evidence.
+- Guarded integration suites that reject unsafe database targets before engine
+  construction and sanitize unavailable-target failures.
+- Non-root minimal container, health-gated Compose startup, automatic migration,
+  restart-safe schema handling, and three-gate backend CI.
+
+## Documentation
+
+- [`docs/specs/telemetry-read-api.md`](docs/specs/telemetry-read-api.md) —
+  implemented telemetry-read contract.
+- [`docs/reviews/telemetry-read-api-final-verification.md`](docs/reviews/telemetry-read-api-final-verification.md)
+  — telemetry implementation and PostgreSQL evidence.
+- [`docs/reviews/production-readiness-source-research.md`](docs/reviews/production-readiness-source-research.md)
+  — official-source implementation constraints.
+- [`docs/reviews/production-readiness-final-verification.md`](docs/reviews/production-readiness-final-verification.md)
+  — checkout-specific production-readiness results.
 
 ## License
 
