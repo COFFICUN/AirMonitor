@@ -23,44 +23,48 @@ Read completely:
 - backend/app/services/telemetry_cursor.py
 - backend/app/services/telemetry.py
 - backend/app/schemas/telemetry.py
-- backend/app/api/query_validation.py
-- backend/app/repositories/measurement.py
-- backend/app/repositories/measurement_session.py
-- backend/tests/test_telemetry_cursor.py
-- backend/tests/test_telemetry_query_validation.py
-- backend/tests/test_telemetry_read_repositories.py
-- backend/tests/test_telemetry_read_services.py
+- backend/app/schemas/sessions.py
+- backend/app/schemas/measurements.py
+- backend/app/api/dependencies.py
+- backend/app/db/dependencies.py
+- backend/tests/test_api_schemas.py
+- backend/tests/test_api_dependencies.py
+- backend/tests/test_api_routes.py
+- backend/tests/test_api_openapi.py
+- backend/tests/test_api_architecture.py
 
-Inspect existing schema, dependency-provider, route, OpenAPI, error, and
-architecture test conventions before editing.
+The approved Phase D1 tests must not be weakened.
 
 ## Current task
 
-Telemetry Read API — Phase D1.
+Telemetry Read API — Phase D2.
 
-This is an intentionally RED public API and OpenAPI contract checkpoint.
+Implement only:
+
+- public telemetry list response schemas;
+- request-scoped telemetry query-service providers.
+
+Do not implement GET routes in this phase.
+
+Do not change OpenAPI indirectly through route registration.
+
+Do not implement indexes, migrations, integration tests, authentication,
+frontend work, aggregation, AQI, or documentation.
+
+## Allowed production changes
 
 Modify only:
 
-- backend/tests/test_api_schemas.py
-- backend/tests/test_api_routes.py
-- backend/tests/test_api_openapi.py
-- backend/tests/test_api_dependencies.py
-- backend/tests/test_api_architecture.py
+- backend/app/schemas/telemetry.py
+- backend/app/api/dependencies.py
 
-Do not modify production code.
+Do not modify tests.
 
-Do not create new test files.
+Do not modify any other production file.
 
-Stop for manual external review after the RED checkpoint.
+## Response schema contract
 
-## Future public response schemas
-
-The future module remains:
-
-backend/app/schemas/telemetry.py
-
-Approved future response symbols:
+Add to backend/app/schemas/telemetry.py:
 
 - SessionListResponse
 - MeasurementListResponse
@@ -75,325 +79,124 @@ MeasurementListResponse exact fields:
 - items: list[MeasurementResponse]
 - next_cursor: str | None
 
-Reuse the existing concrete item schemas:
+Both fields are required.
+
+Do not assign defaults.
+
+Valid construction requires both:
+
+items=...
+next_cursor=...
+
+Reuse:
 
 - app.schemas.sessions.SessionResponse
 - app.schemas.measurements.MeasurementResponse
 
-Do not create competing session or measurement item schemas.
+The envelopes must contain no other fields.
 
 Do not add:
 
-- total;
-- page;
-- offset;
-- has_more;
-- count;
-- internal IDs beyond fields already present in the existing item schemas;
-- metadata dictionaries.
+- total
+- count
+- page
+- offset
+- has_more
+- metadata
 
-The response envelope contains exactly:
+Follow the current response-model base convention used by existing ORM response
+schemas where applicable.
 
-{
-  "items": [...],
-  "next_cursor": null
-}
+The schemas must serialize ORM items using the existing SessionResponse and
+MeasurementResponse contracts.
 
-or:
+Export both public symbols according to the current module export convention.
 
-{
-  "items": [...],
-  "next_cursor": "<opaque cursor>"
-}
+## Dependency provider contract
 
-## Exact session item fields
-
-The existing SessionResponse fields remain authoritative:
-
-- id
-- device_id
-- status
-- started_at
-- ended_at
-- latitude
-- longitude
-- sample_count
-- created_at
-
-Do not add or remove item fields.
-
-## Exact measurement item fields
-
-The existing MeasurementResponse fields remain authoritative:
-
-- id
-- device_id
-- session_id
-- source_message_id
-- measured_at
-- received_at
-- temperature
-- humidity
-- pm1
-- pm25
-- pm10
-- pc0_3
-- pc0_5
-- pc1_0
-- pc2_5
-- pc5_0
-- pc10
-- latitude
-- longitude
-- is_valid
-- validation_note
-- created_at
-
-Do not add or remove item fields.
-
-## Future service providers
-
-Future provider symbols in backend/app/api/dependencies.py:
+Add to backend/app/api/dependencies.py:
 
 - get_session_telemetry_query_service
 - get_measurement_telemetry_query_service
 
-Each provider:
+Exact behavior:
 
-- receives the existing request-scoped AsyncSession dependency;
-- constructs the matching query service;
-- passes that exact session object to the service;
-- creates no additional session;
-- performs no query or transaction work.
+def get_session_telemetry_query_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> SessionTelemetryQueryService:
+    return SessionTelemetryQueryService(session)
 
-## Exact routes
+def get_measurement_telemetry_query_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> MeasurementTelemetryQueryService:
+    return MeasurementTelemetryQueryService(session)
 
-Future routes:
+Follow the existing provider annotation and Depends conventions exactly.
 
-GET /api/v1/devices/{device_id}/sessions
+Each provider must:
 
-Operation ID:
+- use the existing request-scoped get_db_session dependency;
+- pass the exact supplied AsyncSession object;
+- construct exactly one service;
+- create no database engine or second session;
+- perform no query;
+- perform no execute;
+- perform no begin, commit, rollback or flush;
+- contain no error translation.
 
-list_device_sessions
+Export both symbols according to current module convention.
 
-GET /api/v1/devices/{device_id}/measurements
+## Scope exclusions
 
-Operation ID:
+Do not modify or create:
 
-list_device_measurements
+- sessions endpoint GET route;
+- measurements endpoint GET route;
+- routers;
+- main application;
+- response helpers;
+- error handlers;
+- query validation;
+- cursor implementation;
+- repositories;
+- services;
+- ORM models;
+- migrations;
+- settings;
+- tests.
 
-Both return HTTP 200.
+## Expected checkpoint
 
-Both document exactly:
+After implementation:
 
-- 200
-- 404
-- 422
-- 500
+Schema telemetry cases:
 
-Existing common framework responses may be represented through the current
-project response helpers, but no extra domain status such as 409 is introduced
-for these reads.
+- 6 passed.
 
-## Session route behavior
+Dependency telemetry cases:
 
-The future session GET operation:
+- 2 passed.
 
-- uses the existing bounded positive PostgreSQL INTEGER device_id path;
-- applies strict_session_query_parameters as a decorator dependency;
-- depends on resolve_session_read_request;
-- depends on get_session_telemetry_query_service;
-- awaits exactly one list_sessions(read_request=...) call;
-- converts service ORM items through SessionResponse;
-- returns SessionListResponse;
-- preserves page order;
-- returns page.next_cursor unchanged.
+Existing schema and dependency assertions remain green.
 
-Approved query parameters:
+Route telemetry cases remain intentionally RED because GET routes do not yet
+exist.
 
-- status
-- started_from
-- started_to
-- limit
-- cursor
+OpenAPI telemetry cases remain intentionally RED because GET operations do not
+yet exist.
 
-## Measurement route behavior
+Architecture telemetry route case remains intentionally RED because route
+functions do not yet exist.
 
-The future measurement GET operation:
+Expected focused D1 partition:
 
-- uses the existing bounded positive PostgreSQL INTEGER device_id path;
-- applies strict_measurement_query_parameters as a decorator dependency;
-- depends on resolve_measurement_read_request;
-- depends on get_measurement_telemetry_query_service;
-- awaits exactly one list_measurements(read_request=...) call;
-- converts service ORM items through MeasurementResponse;
-- returns MeasurementListResponse;
-- preserves page order;
-- returns page.next_cursor unchanged.
+- 8 formerly RED cases become GREEN;
+- approximately 40 intentional RED cases remain;
+- no new failure category is allowed.
 
-Approved query parameters:
+Exact counts must be reported from the actual run rather than assumed.
 
-- session_id
-- measured_from
-- measured_to
-- limit
-- cursor
-
-## HTTP behavior to lock in tests
-
-Tests must cover:
-
-- both GET paths return 200;
-- exact response envelope;
-- exact public item fields;
-- JSON datetime and numeric serialization;
-- default limit forwarding;
-- explicit limit forwarding;
-- all approved filters forwarding;
-- next_cursor forwarding;
-- empty list behavior;
-- safe unknown-device 404;
-- malformed path/query/cursor safe 422;
-- generic failure safe 500;
-- unknown query parameter never calls service;
-- repeated query parameter never calls service;
-- repeated identical query parameter never calls service;
-- equal from/to reaches the service so device existence remains enforceable;
-- service receives the exact resolved read_request;
-- service is awaited exactly once;
-- no mutation or transaction method is called.
-
-For measurements:
-
-- a valid nonexistent session_id produces an empty 200 page;
-- a valid session_id belonging to another device also produces an empty 200
-  page;
-- the endpoint must not reveal whether the session exists or who owns it.
-
-This behavior is implemented by normal device-scoped repository filtering, not
-by a separate session ownership error.
-
-## Route compatibility
-
-The existing static route:
-
-GET /api/v1/devices/{device_id}/sessions/active
-
-must remain unchanged and reachable.
-
-The new collection route must not collide with it.
-
-Do not change the existing nine operation contracts.
-
-## OpenAPI contract
-
-After future implementation OpenAPI must contain:
-
-- version 3.1.0;
-- 11 total operations;
-- 10 under /api/v1;
-- 1 under /health;
-- 11 unique operation IDs.
-
-New operation IDs are exactly:
-
-- list_device_sessions
-- list_device_measurements
-
-Success responses must reference concrete list envelope schemas.
-
-OpenAPI tests must verify:
-
-- both GET paths;
-- exact operation IDs;
-- 200/404/422/500 documented responses;
-- query parameter names;
-- query parameter types;
-- limit default 100;
-- limit minimum 1;
-- limit maximum 500;
-- cursor maximum length 2048;
-- status enum active/completed/cancelled;
-- device_id PostgreSQL INTEGER maximum;
-- session_id PostgreSQL INTEGER maximum;
-- timestamps represented as date-time values.
-
-Capture and compare the existing nine operation contracts before adding new
-assertions. They must remain structurally equivalent.
-
-Do not use fragile whole-document snapshotting when targeted structural
-comparison is sufficient.
-
-## Architecture tests
-
-Add assertions proving future routes:
-
-- do not import repositories;
-- do not import SQLAlchemy statement builders;
-- do not call select, where, order_by, limit, offset, begin, commit, rollback,
-  flush, or delete;
-- do not instantiate AsyncSession;
-- depend on service providers;
-- use concrete response models, not dict or Any.
-
-Retain existing architecture policies.
-
-## Test implementation boundary
-
-API tests must override the future service providers.
-
-They must not:
-
-- instantiate a real database session;
-- contact PostgreSQL;
-- read database URLs;
-- activate integration suites;
-- duplicate query-service behavior;
-- duplicate cursor encoding;
-- modify global environment values without exact restoration;
-- rely on route implementation internals beyond the public dependency
-  contract.
-
-Use production cursor helpers when a valid cursor is required.
-
-## Expected RED boundary
-
-Existing tests must remain green.
-
-New assertions may fail only because the approved future symbols and GET
-operations do not exist yet:
-
-- SessionListResponse;
-- MeasurementListResponse;
-- get_session_telemetry_query_service;
-- get_measurement_telemetry_query_service;
-- GET session list route;
-- GET measurement list route.
-
-No syntax failure, unrelated import failure, PostgreSQL access, or existing
-contract regression is acceptable.
-
-Do not use:
-
-- conditional imports;
-- fallback implementations;
-- skips;
-- xfail;
-- importlib workarounds.
-
-## Baseline
-
-Before editing:
-
-- full offline suite: 782 passed, 2 skipped;
-- OpenAPI 3.1.0;
-- 9 operations;
-- 8 /api/v1 operations;
-- 1 /health operation;
-- 9 unique operation IDs;
-- Alembic head a4f9c2e7d1b6.
-
-## Verification
+## Verification environment
 
 Use only:
 
@@ -405,29 +208,52 @@ Every pytest command must include:
 
 Do not connect to PostgreSQL.
 
-Before editing run:
+Do not activate integration suites.
 
-- full offline suite;
-- API schema tests;
-- API route tests;
-- OpenAPI tests;
-- dependency tests;
-- architecture tests;
-- pip check;
-- git diff --check.
+## Required verification
 
-After editing run:
+Before editing:
 
-- all five modified API test files;
-- classify every intentional RED failure;
-- prove existing assertions remain green;
-- run the existing suite excluding only newly added telemetry assertions when
-  technically necessary;
+- run the five D1 files and record the 48-failure RED baseline;
+- run schema tests;
+- run dependency tests;
+- run pip check;
+- run git diff --check.
+
+After schema implementation:
+
+- run the six telemetry schema cases;
+- run the complete schema file.
+
+After provider implementation:
+
+- run the two telemetry dependency cases;
+- run the complete dependency file.
+
+Then:
+
+- run all five D1 files;
+- classify remaining failures;
+- prove route/OpenAPI/architecture RED boundaries remain intentional;
+- run the full offline suite excluding only intentionally RED D1 telemetry
+  route/OpenAPI/architecture assertions where technically necessary;
 - run pip check;
 - run git diff --check;
-- run syntax parsing;
-- run scope scan;
-- run secret and local-path scans.
+- run syntax and import checks;
+- run scope, secret, database URL, environment-read and local-path scans.
+
+## Architecture requirements
+
+Verify:
+
+- schemas import no FastAPI or SQLAlchemy;
+- providers build no SQL;
+- providers do not call execute, begin, commit, rollback or flush;
+- providers do not instantiate AsyncSession;
+- providers use get_db_session;
+- no broad exception handler is added;
+- no environment or settings read is added;
+- application import and OpenAPI generation remain connection-free.
 
 ## Git restrictions
 
@@ -446,19 +272,16 @@ Read-only Git commands are allowed.
 
 ## Definition of done
 
-Phase D1 is complete only when:
+Phase D2 is complete only when:
 
-- exactly the five approved test files changed;
-- no production file changed;
-- schema envelope contracts are covered;
-- dependency providers are covered;
-- both route contracts are covered;
-- unknown/repeated parameters are proven to avoid service calls;
-- equal ranges are proven to reach the service;
-- existing active-session route remains compatible;
-- existing nine OpenAPI contracts remain unchanged;
-- future OpenAPI inventory is fixed at eleven operations;
-- focused failures concern only approved missing production boundaries;
+- exactly two approved production files changed;
+- no test changed;
+- both response schemas satisfy exact required-field contracts;
+- both providers reuse the supplied request-scoped session;
+- schema and dependency telemetry tests pass;
+- remaining RED failures concern only absent GET routes and OpenAPI operations;
+- existing contracts remain green;
 - no PostgreSQL or Git write occurs;
+- Git index remains unchanged;
 - work stops for manual external review.
 '@ | Set-Content -Path ".\AGENTS.md" -Encoding UTF8
