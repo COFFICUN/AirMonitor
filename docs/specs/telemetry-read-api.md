@@ -1,14 +1,21 @@
 # Telemetry Read API — Approved MVP Design Contract
 
-**Status:** approved design for a future implementation
+**Status:** implemented; offline and guarded disposable PostgreSQL live
+verification complete
 
-**Implemented today:** no
+**Implemented today:** yes
 
-**Current OpenAPI baseline:** 3.1.0, nine operations
+**Current OpenAPI baseline:** 3.1.0, eleven operations with eleven unique
+operation IDs
 
-This specification defines only the first AirMonitor v2 telemetry read MVP. It
-does not add routes, models, migrations, authentication, or runtime behavior
-by itself.
+This specification remains the public contract for the first AirMonitor v2
+telemetry read MVP. The two approved routes and their application layers are
+implemented. The ordered index migration and guarded PostgreSQL integration
+coverage are verified against PostgreSQL 18.4, including the reversible live
+migration cycle, exact catalog inventory, both integration suites, and all six
+representative `EXPLAIN (ANALYZE, BUFFERS)` shapes. See
+[`telemetry-read-api-final-verification.md`](../reviews/telemetry-read-api-final-verification.md)
+for the checkout-specific result.
 
 ## Approved endpoints
 
@@ -19,9 +26,9 @@ The MVP contains exactly two new operations:
 | `GET` | `/api/v1/devices/{device_id}/sessions` | `list_device_sessions` |
 | `GET` | `/api/v1/devices/{device_id}/measurements` | `list_device_measurements` |
 
-Implementation would increase the OpenAPI inventory from nine operations to
+Implementation increased the OpenAPI inventory from nine operations to
 eleven. All existing paths, operation IDs, request and response schemas, and
-successful status codes must remain unchanged.
+successful status codes remain unchanged.
 
 ## Shared request rules
 

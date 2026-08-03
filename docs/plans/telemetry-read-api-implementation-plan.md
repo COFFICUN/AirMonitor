@@ -2,11 +2,23 @@
 
 **Plan date:** 2026-07-30
 
-**Plan status:** Phase A output; implementation has not started
+**Plan status:** historical Phase A plan; implementation, offline verification,
+and guarded disposable PostgreSQL live verification are complete
 
 **Authoritative contract:** `docs/specs/telemetry-read-api.md`
 
 **Source audit:** `docs/reviews/telemetry-read-api-source-audit.md`
+
+**Current verification:**
+`docs/reviews/telemetry-read-api-final-verification.md`
+
+The application layers and ordered index migration described by this plan are
+implemented. The full offline suite, guarded OpenAPI checks, reversible live
+migration cycle, exact PostgreSQL catalog checks, both integration suites, and
+six representative `EXPLAIN (ANALYZE, BUFFERS)` shapes pass. The disposable
+PostgreSQL 18.4 container was removed after verification. The historical phase
+boundaries below are retained as planning provenance; the current root
+instructions authorized the continuous completion macro phase.
 
 **Current base:** `develop` at
 `a83b065e1804e63798e714eac5496ecf957ba84f`
@@ -1714,39 +1726,41 @@ still be amended safely, or a narrowly named follow-up commit after review.
 
 ## 26. Final acceptance checklist
 
-- [ ] Exactly two GET operations added.
-- [ ] Existing nine operations unchanged.
-- [ ] Eleven unique operation IDs.
-- [ ] Exact existing item fields.
-- [ ] Exact `{items, next_cursor}` envelopes.
-- [ ] Unknown and repeated query parameters return safe 422.
-- [ ] All IDs remain within PostgreSQL `INTEGER`.
-- [ ] All query timestamps are aware and normalized to UTC.
-- [ ] Reversed ranges return 422.
-- [ ] Equal ranges check device existence before empty 200.
-- [ ] Cursor v1 is canonical, strict, URL-safe, unpadded, versioned,
+- [x] Exactly two GET operations added.
+- [x] Existing nine operations unchanged.
+- [x] Eleven unique operation IDs.
+- [x] Exact existing item fields.
+- [x] Exact `{items, next_cursor}` envelopes.
+- [x] Unknown and repeated query parameters return safe 422.
+- [x] All IDs remain within PostgreSQL `INTEGER`.
+- [x] All query timestamps are aware and normalized to UTC.
+- [x] Reversed ranges return 422.
+- [x] Equal ranges check device existence before empty 200.
+- [x] Cursor v1 is canonical, strict, URL-safe, unpadded, versioned,
       resource/filter-bound, and secret-free.
-- [ ] Stable descending keyset order uses timestamp and ID.
-- [ ] Fetch uses limit+1 and next cursor uses last returned item.
-- [ ] No offset/count query.
-- [ ] Reads perform no mutation or transaction control.
-- [ ] Exactly four new indexes replace all four old explicit indexes.
-- [ ] The only session-specific raw index at the new head is
+- [x] Stable descending keyset order uses timestamp and ID.
+- [x] Fetch uses limit+1 and next cursor uses last returned item.
+- [x] No offset/count query.
+- [x] Reads perform no mutation or transaction control.
+- [x] Exactly four new indexes replace all four old explicit indexes.
+- [x] The only session-specific raw index at the new head is
       `ix_raw_measurements_session_id_measured_at_id_desc`.
-- [ ] Session-filtered endpoint SQL retains both `device_id` and `session_id`.
+- [x] Session-filtered endpoint SQL retains both `device_id` and `session_id`.
 - [ ] Live plans validate endpoint ordering, chronology MAX, and child-side
       lookup use of the session-first raw index.
-- [ ] ORM/Alembic parity and reversible downgrade.
-- [ ] Full offline suite green with approved interpreter.
-- [ ] Guarded OpenAPI generation makes no connection.
-- [ ] Disposable PostgreSQL suite passes twice and cleans/reset identities.
-- [ ] Representative `EXPLAIN (ANALYZE, BUFFERS)` approved.
-- [ ] Documentation contains no secret/local target.
-- [ ] Five-axis review complete.
+- [x] ORM/Alembic parity and reversible downgrade.
+- [x] Full offline suite green with approved interpreter.
+- [x] Guarded OpenAPI generation makes no connection.
+- [x] Disposable PostgreSQL suite passes twice and cleans/reset identities.
+- [x] Representative `EXPLAIN (ANALYZE, BUFFERS)` approved.
+- [x] Documentation contains no secret/local target.
+- [x] Five-axis review complete.
 - [ ] Manual external review approves each gate.
 
-## 27. Phase A stop
+## 27. Historical Phase A stop
 
-This plan does not authorize implementation, Git writes, PostgreSQL access, or
-live integration activation. Stop after final verification of the two Phase A
-documents and request manual external review.
+At the time this plan was written, it did not authorize implementation, Git
+writes, PostgreSQL access, or live integration activation. That historical
+boundary was superseded by the current root completion instructions. The
+completed offline and disposable live results are recorded in the final
+verification report.
