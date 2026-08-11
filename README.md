@@ -8,8 +8,9 @@ The repository intentionally contains two application generations:
 
 - **AirMonitor v1** is the stable legacy diploma application at the repository
   root. It uses Flask, SQLite, the original firmware, and the legacy browser UI.
-- **AirMonitor v2** is the active backend under `backend/`. It uses Python 3.13,
-  FastAPI, PostgreSQL, async SQLAlchemy, Alembic, Pydantic, and pytest.
+- **AirMonitor v2** is the active system: the backend lives under `backend/`
+  and the dashboard lives under `frontend/`. It uses Python 3.13, FastAPI,
+  PostgreSQL, async SQLAlchemy, Alembic, React, TypeScript, Vite, and Playwright.
 
 Root v1 application files are reference material. Current development targets
 the v2 backend and does not silently migrate or rewrite the legacy application.
@@ -26,7 +27,11 @@ The backend currently supports:
 - strict query validation and opaque keyset pagination;
 - guarded disposable-PostgreSQL integration testing;
 - automatic Alembic migration in the container startup path;
-- a local Docker Compose stack and backend GitHub Actions CI.
+- a Russian-language public information site and responsive participant
+  application for device setup, sessions, live telemetry, cursor-paginated
+  history, charts, and a real-coordinate map of measurement sessions;
+- a non-root static frontend runtime with a same-origin API proxy;
+- a local three-service Docker Compose stack and frontend/backend CI gates.
 
 The OpenAPI contract is version 3.1.0 with 11 operations: 10 under `/api/v1`
 and one under `/health`. All 11 operation IDs are unique. The sole Alembic head
@@ -55,6 +60,36 @@ FastAPI route
 - Telemetry history uses stable descending keyset order and bounded
   `limit + 1` repository reads, never offset pagination.
 
+The browser path keeps transport and presentation concerns separate:
+
+```text
+React feature panel
+  -> focused hook
+  -> typed Fetch client and response validation
+  -> same-origin /api or /health request
+  -> Vite development proxy or Nginx production proxy
+  -> FastAPI
+```
+
+- One typed client owns URL joining, JSON parsing, request timeouts, abort
+  signals, and safe error normalization.
+- Browser storage contains only a versioned, validated numeric device ID and a
+  separate strict record of harmless display preferences.
+- Geolocation is requested once when a session starts, never on page load or
+  during polling.
+- Live telemetry uses one completion-scheduled five-second loop, pauses while
+  the document is hidden, and never overlaps requests.
+- Session and measurement cursors remain opaque. The data layer keeps API
+  order; only chart presentation copies are reordered chronologically.
+- Leaflet is isolated behind a small map adapter. Each session is represented
+  by one geographic marker; no movement or polyline is inferred inside a
+  session. Exact telemetry remains available in an accessible table and
+  session details remain outside the map.
+- `BrowserRouter` provides public routes (`/`, `/about`, `/participate`,
+  `/methodology`, `/login`) and participant routes under `/app`; public pages,
+  the participant shell, route pages, and Leaflet are loaded through focused
+  lazy boundaries.
+
 The local container path is:
 
 ```text
@@ -64,6 +99,8 @@ Docker Compose
   -> alembic upgrade head
   -> one non-root Uvicorn process
   -> /health container healthcheck
+  -> non-root Nginx frontend
+  -> /frontend-health container healthcheck
 ```
 
 For the current MVP, one API container owns startup migration. Do not scale the
@@ -98,8 +135,8 @@ in [`docs/specs/telemetry-read-api.md`](docs/specs/telemetry-read-api.md).
 | SHT30 | Temperature and relative-humidity measurements |
 | Portable power source | Mobile monitoring |
 
-The original firmware remains at the repository root. Firmware changes and a
-v2 browser frontend are outside the current backend production-readiness scope.
+The original firmware remains at the repository root and is unchanged by the
+v2 dashboard.
 
 ## Repository layout
 
@@ -119,7 +156,13 @@ AirMonitor/
 |   |-- .env.example               # host-side Python template
 |   |-- requirements.txt           # runtime dependencies
 |   `-- requirements-dev.txt       # test dependencies
-|-- compose.yaml                   # local api + db stack
+|-- frontend/
+|   |-- src/                       # public site, participant app, typed API/features
+|   |-- e2e/                       # deterministic and guarded browser flows
+|   |-- Dockerfile, nginx.conf     # production static runtime and API proxy
+|   |-- package.json
+|   `-- package-lock.json
+|-- compose.yaml                   # local frontend + api + db stack
 |-- .env.example                   # Compose interpolation template
 |-- .github/workflows/backend-ci.yml
 `-- docs/
@@ -134,7 +177,13 @@ Choose either the Docker path or the local Python path.
 For Docker development:
 
 - Docker Desktop or Docker Engine with `docker compose`;
-- an available local TCP port 8000, or another port set in `.env`.
+- available loopback ports 8080 and 8000, or alternatives set in `.env`.
+
+For frontend-only development:
+
+- Node.js 24.19.0 (the supported range is Node 24);
+- npm 11 or the npm version bundled with the supported Node release;
+- a backend available at `http://127.0.0.1:8000` for real API work.
 
 For host-side development:
 
@@ -172,15 +221,23 @@ Run these commands from the repository root.
    ```
 
 Compose starts `db`, waits for PostgreSQL health, runs `alembic upgrade head`
-inside `api`, and starts Uvicorn only if migration succeeds. The API image is
-built from `backend/Dockerfile` and runs as a dedicated non-root user.
+inside `api`, starts Uvicorn only if migration succeeds, and then starts the
+frontend after API health. Both application images run as dedicated non-root
+users.
 
 The database has no published host port. The unauthenticated API is bound only
 to loopback by default:
 
-- health: <http://127.0.0.1:8000/health>
-- OpenAPI JSON: <http://127.0.0.1:8000/openapi.json>
-- Swagger UI: <http://127.0.0.1:8000/docs>
+- dashboard: <http://127.0.0.1:8080/>
+- dashboard-routed backend health: <http://127.0.0.1:8080/health>
+- direct backend health: <http://127.0.0.1:8000/health>
+- direct OpenAPI JSON: <http://127.0.0.1:8000/openapi.json>
+- direct Swagger UI: <http://127.0.0.1:8000/docs>
+
+Browser JavaScript uses relative `/api/v1/...` and `/health` URLs. Nginx sends
+those requests to the container-only `api:8000` address. Never place the
+Compose service name `api` in browser configuration: it is resolvable inside
+the Compose network, not on the host.
 
 Stop containers while retaining the named development database volume:
 
@@ -210,10 +267,29 @@ The root `.env.example` defines only local Compose inputs:
 | `POSTGRES_USER` | Development database role initialized in the `db` service |
 | `POSTGRES_PASSWORD` | Required placeholder; replace in ignored `.env` |
 | `AIRMONITOR_API_PORT` | Loopback host port mapped to container port 8000 |
+| `AIRMONITOR_FRONTEND_PORT` | Loopback host port mapped to frontend port 8080 |
 
 Compose constructs the application URL with hostname `db`, the Compose service
 name. Host-side Python must use `localhost` or another host-reachable database
 address instead.
+
+### Frontend settings and URL modes
+
+`VITE_API_BASE_URL` is the only frontend API-base variable. Its default is an
+empty string, meaning “use the current browser origin.” That default is the
+recommended setup:
+
+| Mode | Browser URL | Browser API URL | Proxy target |
+|---|---|---|---|
+| Local Vite + local Python | `http://127.0.0.1:5173` | relative `/api` and `/health` | host `http://127.0.0.1:8000` |
+| Full Compose | `http://127.0.0.1:8080` | relative `/api` and `/health` | container `http://api:8000` |
+| Direct API inspection | not a frontend mode | `http://127.0.0.1:8000` | none |
+
+An absolute `VITE_API_BASE_URL` is accepted for deliberate deployments, but
+cross-origin browser requests require an explicit backend CORS policy. The
+current backend intentionally has no CORS middleware because the supported
+development and Compose paths are same-origin. Vite variables are compiled
+into the static bundle; do not put secrets in them.
 
 ### Backend settings
 
@@ -276,6 +352,65 @@ Push-Location .\backend
 
 Stop Uvicorn with Ctrl+C and run `Pop-Location` when finished.
 
+## Local frontend development
+
+Install the pinned dependency graph and start Vite from the repository root:
+
+```powershell
+Push-Location .\frontend
+npm ci --no-audit --no-fund
+npm run dev
+```
+
+Open <http://127.0.0.1:5173>. With the default configuration, Vite proxies
+relative `/api` and `/health` requests to a backend running on
+`http://127.0.0.1:8000`. Stop Vite with Ctrl+C and run `Pop-Location`.
+
+The public start page is `/`. It explains the real project, methodology,
+participation and privacy boundaries without mounting participant API state.
+`/login` is deliberately explanatory: the current backend has no account,
+credential or token contract, so the disabled preview form sends and stores
+nothing.
+
+The participant workflow begins at `/app`:
+
+1. confirm that the system status reads “Система доступна”;
+2. open “Моё устройство”, enter an existing numeric device ID or register a
+   device UID and optional name;
+3. activate the selected device if necessary;
+4. start a session and answer the browser's one-time geolocation prompt;
+5. observe live telemetry without reloading the page;
+6. complete or explicitly confirm cancellation of the session;
+7. select a historical session, filter or load more with cursor pagination,
+   and inspect its chart, exact-value table, and map position.
+
+The selected device ID is restored from the versioned
+`airmonitor.frontend.v2.device-id` browser-storage record. Use “Очистить выбор”
+to remove it. No credential, cursor content, backend trace, or geolocation
+history is stored by the frontend.
+
+Local display preferences use the separate
+`airmonitor.frontend.v2.preferences` record. Settings cover system/light/dark
+theme, display density, motion, 12/24-hour time, a bounded 5/10/30-second
+polling interval and OSM tile loading. Valid version 1 records migrate to the
+system theme; unknown or corrupt records reset to safe defaults. “Сбросить
+настройки отображения” removes the record.
+
+Geolocation errors are intentionally separate from backend errors. Permission
+denial, timeout, unavailable location, and unsupported-browser states are shown
+without fabricating coordinates. The dashboard uses one position only for the
+session-start request and does not continuously track the browser.
+
+One session always represents one stationary geographic point. Keep the sensor
+in place while it collects a series of values. To study another place, finish
+the current session, move the device, and start a new session.
+
+Live telemetry requests only the newest measurement (`limit=1`) about every
+five seconds. An empty result is a valid state. The last successful result
+remains visible during a temporary failure and becomes visibly stale when
+updates stop. Polling pauses while the page is hidden and resumes without a
+full reload or a new geolocation request.
+
 ## Alembic migrations
 
 Run migration commands from `backend/` so application imports resolve using the
@@ -313,6 +448,36 @@ Focused health, OpenAPI, and infrastructure contracts:
 Push-Location .\backend
 & .\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider tests/test_health.py tests/test_api_openapi.py tests/test_production_readiness_infrastructure.py
 Pop-Location
+```
+
+Frontend type, unit, build, and browser gates:
+
+```powershell
+Push-Location .\frontend
+npm ci --no-audit --no-fund
+npm run typecheck
+npm test
+npm run build
+npx playwright install chromium
+npm run test:e2e
+Pop-Location
+```
+
+The ordinary Playwright suite uses deterministic route fixtures, mocked
+geolocation, and deterministic map tiles. It covers all public and participant
+routes, honest no-op login, health, device selection and registration, storage
+restore, session start/denial/completion, live updates without reload, opaque
+cursor load-more, statistics/chart/table/map rendering, safe server errors,
+mobile navigation, narrow layout, modal keyboard behavior, and axe scans of
+representative public, app, table, and dialog states. Separate specs are
+guarded for screenshot capture, disposable Compose smoke, and restart recovery;
+they do not run against an arbitrary local database.
+
+Build or inspect the frontend image independently:
+
+```powershell
+docker build --file .\frontend\Dockerfile --tag airmonitor-frontend:local .\frontend
+docker image inspect --format '{{.Config.User}}' airmonitor-frontend:local
 ```
 
 Dependency consistency:
@@ -378,6 +543,9 @@ cancellation.
 
 Its independent jobs are:
 
+- **Frontend gates:** Node 24.19.0, deterministic `npm ci`, TypeScript,
+  Vitest, production build, pinned Chromium, deterministic Playwright, failure
+  diagnostics, frontend image build, and non-root runtime-user inspection.
 - **Offline backend tests:** Python 3.13, runtime/development dependencies,
   `pip check`, exact Alembic-head validation, and the complete offline suite
   with live variables explicitly empty.
@@ -387,8 +555,10 @@ Its independent jobs are:
 - **Backend image build:** builds `backend/Dockerfile`, does not push it, and
   inspects the configured runtime user to reject root execution.
 
-GitHub-hosted CI cannot be executed locally. The same dependency, test,
-migration, Docker build, and Compose smoke commands are reproducible locally.
+GitHub-hosted CI cannot be executed locally. The same dependency, type, test,
+browser, migration, and Docker build commands are reproducible locally. The
+full three-service Compose smoke/restart workflow is recorded separately in
+the frontend final-verification report.
 
 ## Troubleshooting
 
@@ -422,13 +592,50 @@ the target or migration problem; do not bypass the entrypoint.
 Set `AIRMONITOR_API_PORT` in the root `.env` to another unused host port. The
 container still listens on port 8000.
 
+### Port 8080 is already in use
+
+Set `AIRMONITOR_FRONTEND_PORT` in the root `.env` to another unused loopback
+port and open that port in the browser. The frontend container still listens
+on port 8080.
+
+### The dashboard loads but reports that the backend is unavailable
+
+- With Vite, verify the host backend at <http://127.0.0.1:8000/health> and do
+  not set `VITE_API_BASE_URL` to the Compose service name.
+- With Compose, verify `docker compose ps`; frontend health depends on API
+  health, and the API depends on database health and successful migrations.
+- A cross-origin absolute API base is not the default path and will require
+  explicit backend CORS configuration.
+
+### Geolocation is denied or times out
+
+Geolocation is requested only after “Начать сессию.” Allow location access for
+the current loopback origin in browser site settings and retry. A location
+failure does not imply that the backend is unavailable, and the application
+does not substitute synthetic coordinates.
+
+### The map has no tiles
+
+The session list and coordinates remain usable, but the Leaflet basemap needs
+internet access to `tile.openstreetmap.org`. Ad blockers, offline operation, or
+tile-service availability can prevent tiles from loading. OpenStreetMap
+attribution must remain visible; do not remove it when changing map styling.
+
 ## Security and operational boundaries
 
 - AirMonitor v2 has no authentication, authorization, or rate limiting.
   Public internet exposure is not approved.
 - The Compose API port is loopback-bound and PostgreSQL is not published.
-- The API container runs as UID/GID 10001 and enables `no-new-privileges` in
-  Compose.
+- The API container runs as UID/GID 10001; the frontend runs as UID/GID 101.
+  Both enable `no-new-privileges`, and the frontend filesystem is read-only
+  except for a small `noexec` `/tmp` tmpfs.
+- Nginx applies a restrictive content-security policy and proxies only `/api/`
+  plus exact `/health`; API failures cannot fall through to the SPA shell.
+- Browser responses are contract-validated, complete backend exceptions are
+  never rendered, and the UI uses no unsafe HTML injection.
+- The only third-party browser traffic is the documented OpenStreetMap tile
+  request when the map is visible. Browser geolocation is not sent to the tile
+  service by application code.
 - Real `.env` files, credentials, certificates, database files, logs, caches,
   and local virtual environments are excluded from Git and/or Docker context.
 - Database values are passed through environment variables for this local
@@ -442,17 +649,20 @@ container still listens on port 8000.
 Not implemented in v2:
 
 - authentication, authorization, and rate limiting;
-- a v2 browser frontend;
-- HTTPS termination or a reverse proxy;
+- HTTPS termination or an internet-facing gateway;
 - cloud deployment, Kubernetes, or multi-replica migration coordination;
 - monitoring-platform integration and background workers;
 - Redis, MQTT, WebSockets, retention automation, CSV export, or forecasting
-  changes.
+  changes;
+- a device collection browser—the MVP selects or registers one device ID;
+- offline map tiles—the dashboard's list/table functions remain available
+  when OpenStreetMap tiles cannot load;
+- browser-side measurement ingestion—the dashboard reads telemetry, while the
+  existing ingestion API remains available to approved producers.
 
 Next production-facing work should design identity/access control first, then
-external secret management, separated migration ownership, HTTPS/reverse proxy
-deployment, and observability. Frontend v2 work remains a separate product
-phase.
+external secret management, separated migration ownership, HTTPS gateway
+deployment, and observability.
 
 ## Technical highlights
 
@@ -460,10 +670,14 @@ phase.
 - Async request-scoped persistence with explicit service transaction ownership.
 - Composite same-device foreign keys and reversible Alembic migrations.
 - Opaque filter-bound keyset cursors and PostgreSQL-backed index-plan evidence.
+- Typed, abortable frontend transport; one-shot geolocation; non-overlapping
+  visibility-aware polling; bounded cursor history; accessible SVG charts; and
+  an isolated Leaflet map.
 - Guarded integration suites that reject unsafe database targets before engine
   construction and sanitize unavailable-target failures.
-- Non-root minimal container, health-gated Compose startup, automatic migration,
-  restart-safe schema handling, and three-gate backend CI.
+- Two non-root application images, health-gated three-service Compose startup,
+  automatic migration, restart-safe schema handling, deterministic browser
+  tests, and preserved backend CI gates.
 
 ## Documentation
 
@@ -475,6 +689,13 @@ phase.
   — official-source implementation constraints.
 - [`docs/reviews/production-readiness-final-verification.md`](docs/reviews/production-readiness-final-verification.md)
   — checkout-specific production-readiness results.
+- [`docs/reviews/frontend-v2-source-research.md`](docs/reviews/frontend-v2-source-research.md)
+  — official-source frontend implementation constraints and pinned versions.
+- [`docs/reviews/frontend-v2-api-compatibility.md`](docs/reviews/frontend-v2-api-compatibility.md)
+  — checkout-derived mapping of all 11 operations to frontend workflows.
+- [`docs/reviews/frontend-v2-final-verification.md`](docs/reviews/frontend-v2-final-verification.md)
+  — frontend architecture, UX, security, browser, Docker, Compose, restart,
+  and cleanup evidence.
 
 ## License
 

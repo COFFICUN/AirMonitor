@@ -330,10 +330,15 @@ def test_ci_uses_only_official_pinned_actions_and_does_not_echo_secrets() -> Non
     assert uses_values
     assert set(uses_values) == {
         "actions/checkout@v7",
+        "actions/setup-node@v6",
         "actions/setup-python@v7",
+        "actions/upload-artifact@v7",
     }
     assert all(
-        re.fullmatch(r"actions/(checkout|setup-python)@v\d+", value)
+        re.fullmatch(
+            r"actions/(checkout|setup-node|setup-python|upload-artifact)@v\d+",
+            value,
+        )
         for value in uses_values
     )
     assert "secrets." not in source
