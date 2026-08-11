@@ -1,9 +1,10 @@
-name: Backend CI
+name: AirMonitor CI
 
 on:
   pull_request:
     paths:
       - backend/**
+      - frontend/**
       - docs/**
       - compose.yaml
       - .env.example
@@ -16,6 +17,7 @@ on:
       - develop
     paths:
       - backend/**
+      - frontend/**
       - docs/**
       - compose.yaml
       - .env.example
@@ -28,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: backend-ci-${{ github.workflow }}-${{ github.ref }}
+  group: airmonitor-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -36,6 +38,60 @@ defaults:
     shell: bash
 
 jobs:
+  frontend:
+    name: Frontend type, unit, browser, and image gates
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 24.19.0
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Check TypeScript
+        run: npm run typecheck
+
+      - name: Run frontend unit and component tests
+        run: npm test
+
+      - name: Build production frontend
+        run: npm run build
+
+      - name: Install pinned Chromium and operating-system dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Run deterministic Playwright flows
+        run: npm run test:e2e
+
+      - name: Upload browser diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-playwright-diagnostics
+          path: frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Build frontend image
+        run: docker build --file Dockerfile --tag airmonitor-frontend:ci .
+
+      - name: Verify configured frontend runtime user
+        run: |
+          runtime_user="$(docker image inspect --format '{{.Config.User}}' airmonitor-frontend:ci)"
+          test -n "${runtime_user}"
+          test "${runtime_user}" != "root"
+          test "${runtime_user%%:*}" != "0"
+
   offline:
     name: Offline backend tests
     runs-on: ubuntu-latest

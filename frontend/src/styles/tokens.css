@@ -1,0 +1,198 @@
+@font-face {
+  font-family: "Onest";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/onest/onest-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+
+@font-face {
+  font-family: "Onest";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/onest/onest-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: "Onest";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/onest/onest-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  color-scheme: light;
+  --color-ink: #122a27;
+  --color-ink-soft: #3e5650;
+  --color-muted: #566a62;
+  --color-line: #d9e1da;
+  --color-line-strong: #c5d0c7;
+  --color-canvas: #eef2eb;
+  --color-surface: #ffffff;
+  --color-surface-soft: #f7f9f5;
+  --color-blue: #0b625b;
+  --color-blue-hover: #074d48;
+  --color-blue-soft: #e4f3ef;
+  --color-cyan: #087f82;
+  --color-cyan-soft: #e0f5f2;
+  --color-green: #17745b;
+  --color-green-soft: #e1f4eb;
+  --color-yellow: #a66a00;
+  --color-yellow-soft: #fff6dc;
+  --color-orange: #bf5c21;
+  --color-orange-soft: #fff0e5;
+  --color-red: #c83f4c;
+  --color-red-hover: #a82d39;
+  --color-red-soft: #ffedf0;
+  --danger-button-background: #c83f4c;
+  --danger-button-hover: #a82d39;
+  --primary-button-background: #0b625b;
+  --primary-button-hover: #074d48;
+  --primary-button-foreground: #ffffff;
+  --color-navy: #0b2928;
+  --color-navy-elevated: #173b38;
+  --color-lime: #c8f169;
+  --color-lime-hover: #b4df50;
+  --color-lime-soft: #effbd2;
+  --focus-ring: #087f82;
+  --font-sans: "Onest", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: "Onest", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+  --radius-sm: 0.6rem;
+  --radius-md: 0.9rem;
+  --radius-lg: 1.2rem;
+  --radius-xl: 1.65rem;
+  --shadow-sm: 0 1px 2px rgb(11 41 40 / 4%), 0 5px 16px rgb(11 41 40 / 5%);
+  --shadow-md: 0 18px 48px rgb(11 41 40 / 12%);
+  --shadow-blue: 0 12px 28px rgb(7 77 72 / 18%);
+  --header-background: rgb(238 242 235 / 88%);
+  --chip-background: rgb(255 255 255 / 72%);
+  --mobile-nav-background: rgb(255 255 255 / 96%);
+  --mobile-nav-shadow: 0 -10px 30px rgb(16 35 63 / 8%);
+  --table-header-background: #edf3f8;
+  --map-background: #dbeaf1;
+  --control-height: 2.75rem;
+  --content-width: 78rem;
+  --app-width: 94rem;
+  --sidebar-width: 15.75rem;
+  --sidebar-collapsed: 5.25rem;
+  --duration-fast: 140ms;
+  --duration-normal: 260ms;
+  --z-header: 30;
+  --z-sidebar: 40;
+  --z-mobile-nav: 50;
+  --z-modal: 100;
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background: var(--color-canvas);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html[data-density='compact'] { --space-5: 1rem; --space-6: 1.15rem; --space-8: 1.5rem; --space-10: 2rem; --control-height: 2.5rem; }
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --color-ink: #eef6f1;
+  --color-ink-soft: #bfd0c8;
+  --color-muted: #90aaa0;
+  --color-line: #35514a;
+  --color-line-strong: #49655e;
+  --color-canvas: #0d1f1d;
+  --color-surface: #152c29;
+  --color-surface-soft: #1b3531;
+  --color-blue: #79d7c9;
+  --color-blue-hover: #a4e8de;
+  --color-blue-soft: #21423d;
+  --color-cyan: #6ed6d2;
+  --color-cyan-soft: #193f3c;
+  --color-green: #79d8b1;
+  --color-green-soft: #193c32;
+  --color-yellow: #f1c86e;
+  --color-yellow-soft: #493c22;
+  --color-orange: #f1a070;
+  --color-orange-soft: #4c3025;
+  --color-red: #ff9ba4;
+  --color-red-hover: #ffc0c6;
+  --color-red-soft: #4e2930;
+  --primary-button-background: #79d7c9;
+  --primary-button-hover: #a4e8de;
+  --primary-button-foreground: #071a19;
+  --color-navy: #071a19;
+  --color-navy-elevated: #153b37;
+  --color-lime: #c8f169;
+  --color-lime-hover: #dcff8c;
+  --color-lime-soft: #304522;
+  --focus-ring: #c8f169;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 18%), 0 8px 22px rgb(0 0 0 / 16%);
+  --shadow-md: 0 20px 54px rgb(0 0 0 / 32%);
+  --shadow-blue: 0 12px 28px rgb(0 0 0 / 28%);
+  --header-background: rgb(13 31 29 / 90%);
+  --chip-background: rgb(27 53 49 / 84%);
+  --mobile-nav-background: rgb(13 31 29 / 96%);
+  --mobile-nav-shadow: 0 -10px 30px rgb(0 0 0 / 25%);
+  --table-header-background: #1e3a36;
+  --map-background: #203b3c;
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-theme='system'] {
+    color-scheme: dark;
+    --color-ink: #eef6f1;
+    --color-ink-soft: #bfd0c8;
+    --color-muted: #90aaa0;
+    --color-line: #35514a;
+    --color-line-strong: #49655e;
+    --color-canvas: #0d1f1d;
+    --color-surface: #152c29;
+    --color-surface-soft: #1b3531;
+    --color-blue: #79d7c9;
+    --color-blue-hover: #a4e8de;
+    --color-blue-soft: #21423d;
+    --color-cyan: #6ed6d2;
+    --color-cyan-soft: #193f3c;
+    --color-green: #79d8b1;
+    --color-green-soft: #193c32;
+    --color-yellow: #f1c86e;
+    --color-yellow-soft: #493c22;
+    --color-orange: #f1a070;
+    --color-orange-soft: #4c3025;
+    --color-red: #ff9ba4;
+    --color-red-hover: #ffc0c6;
+    --color-red-soft: #4e2930;
+    --primary-button-background: #79d7c9;
+    --primary-button-hover: #a4e8de;
+    --primary-button-foreground: #071a19;
+    --color-navy: #071a19;
+    --color-navy-elevated: #153b37;
+    --color-lime: #c8f169;
+    --color-lime-hover: #dcff8c;
+    --color-lime-soft: #304522;
+    --focus-ring: #c8f169;
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 18%), 0 8px 22px rgb(0 0 0 / 16%);
+    --shadow-md: 0 20px 54px rgb(0 0 0 / 32%);
+    --shadow-blue: 0 12px 28px rgb(0 0 0 / 28%);
+    --header-background: rgb(13 31 29 / 90%);
+    --chip-background: rgb(27 53 49 / 84%);
+    --mobile-nav-background: rgb(13 31 29 / 96%);
+    --mobile-nav-shadow: 0 -10px 30px rgb(0 0 0 / 25%);
+    --table-header-background: #1e3a36;
+    --map-background: #203b3c;
+  }
+}

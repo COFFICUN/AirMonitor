@@ -58,6 +58,14 @@ Desktop.ini
 backend/.venv/
 backend/.pytest_cache/
 
+# AirMonitor frontend v2 dependencies, builds, and browser artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/.playwright-cli/
+
 .venv/
 .pytest_cache/
 __pycache__/
