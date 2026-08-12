@@ -39,7 +39,7 @@ services:
       UVICORN_HOST: 0.0.0.0
       UVICORN_PORT: "8000"
     ports:
-      - "127.0.0.1:${AIRMONITOR_API_PORT:-8000}:8000"
+      - "${AIRMONITOR_API_BIND_ADDRESS:-127.0.0.1}:${AIRMONITOR_API_PORT:-8000}:8000"
     healthcheck:
       test:
         - CMD

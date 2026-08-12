@@ -6,6 +6,10 @@
 # Firmware credentials
 secrets.h
 **/secrets.h
+firmware/include/firmware_config.h
+firmware/.pio/
+firmware/.platformio/
+firmware/.venv/
 
 # TLS certificates and private keys
 *.pem

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
     ActiveSessionAlreadyExistsError,
+    ActiveSessionMismatchError,
     ActiveSessionNotFoundError,
     DeviceInactiveError,
     DeviceNotFoundError,
@@ -119,6 +120,7 @@ class MeasurementService:
         *,
         device_id: int,
         measured_at: datetime,
+        session_id: int | None = None,
         source_message_id: str | None = None,
         temperature: float | None = None,
         humidity: float | None = None,
@@ -164,6 +166,14 @@ class MeasurementService:
                     or runtime_state.active_session_id is None
                 ):
                     raise ActiveSessionNotFoundError(device_id=device_id)
+                if (
+                    session_id is not None
+                    and session_id != runtime_state.active_session_id
+                ):
+                    raise ActiveSessionMismatchError(
+                        expected_session_id=session_id,
+                        active_session_id=runtime_state.active_session_id,
+                    )
 
                 measurement_session = (
                     await self.session_repository.get_by_id_for_update(

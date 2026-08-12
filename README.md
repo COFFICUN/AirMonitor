@@ -8,9 +8,9 @@ The repository intentionally contains two application generations:
 
 - **AirMonitor v1** is the stable legacy diploma application at the repository
   root. It uses Flask, SQLite, the original firmware, and the legacy browser UI.
-- **AirMonitor v2** is the active system: the backend lives under `backend/`
-  and the dashboard lives under `frontend/`. It uses Python 3.13, FastAPI,
-  PostgreSQL, async SQLAlchemy, Alembic, React, TypeScript, Vite, and Playwright.
+- **AirMonitor v2** is the active system: firmware lives under `firmware/`, the
+  backend under `backend/`, and the dashboard under `frontend/`. It uses
+  PlatformIO/Arduino-ESP32, FastAPI, PostgreSQL, React, TypeScript, and Vite.
 
 Root v1 application files are reference material. Current development targets
 the v2 backend and does not silently migrate or rewrite the legacy application.
@@ -32,6 +32,8 @@ The backend currently supports:
   history, charts, and a real-coordinate map of measurement sessions;
 - a non-root static frontend runtime with a same-origin API proxy;
 - a local three-service Docker Compose stack and frontend/backend CI gates.
+- session-aware M5Stack firmware with configurable Wi-Fi/API identity, UTC
+  timestamps, idempotent measurement delivery, and a bounded RAM outbox.
 
 The OpenAPI contract is version 3.1.0 with 11 operations: 10 under `/api/v1`
 and one under `/health`. All 11 operation IDs are unique. The sole Alembic head
@@ -107,6 +109,20 @@ For the current MVP, one API container owns startup migration. Do not scale the
 API beyond one container until migration ownership moves to a separate one-off
 job.
 
+The physical telemetry path is:
+
+```text
+PMSA003 + SHT30
+  -> M5Stack Basic / ESP32 Firmware v2
+  -> Wi-Fi HTTP(S)
+  -> FastAPI active-session ingestion
+  -> PostgreSQL
+  -> frontend live telemetry, history, charts, table, and one-point session map
+```
+
+The browser creates and geolocates a session once. Firmware polls that active
+session and sends a stationary series; it never creates a session or a route.
+
 ## API operations
 
 | Method | Path | Operation ID |
@@ -135,8 +151,8 @@ in [`docs/specs/telemetry-read-api.md`](docs/specs/telemetry-read-api.md).
 | SHT30 | Temperature and relative-humidity measurements |
 | Portable power source | Mobile monitoring |
 
-The original firmware remains at the repository root and is unchanged by the
-v2 dashboard.
+The original working firmware remains at the repository root as read-only
+reference. The maintained FastAPI-compatible firmware is under `firmware/`.
 
 ## Repository layout
 
@@ -146,6 +162,7 @@ AirMonitor/
 |-- index.html                     # v1 browser UI
 |-- init_db.py, schema.sql         # v1 SQLite setup
 |-- test1_final.ino                # ESP32 firmware
+|-- firmware/                      # v2 PlatformIO firmware and host tests
 |-- backend/
 |   |-- app/                       # v2 FastAPI application
 |   |-- alembic/                   # PostgreSQL migrations
@@ -178,6 +195,12 @@ For Docker development:
 
 - Docker Desktop or Docker Engine with `docker compose`;
 - available loopback ports 8080 and 8000, or alternatives set in `.env`.
+
+For firmware development and upload:
+
+- Python 3.13 and PlatformIO 6.1.18;
+- a data-capable USB cable and the board's USB serial driver;
+- a LAN/hotspot route from the ESP32 to the computer running FastAPI.
 
 For frontend-only development:
 
@@ -254,6 +277,33 @@ docker compose down --volumes
 
 The second command is destructive for the Compose development volume. It does
 not target an independently managed host PostgreSQL database.
+
+## Firmware v2 quick start
+
+Register or select one active device through the frontend first. Copy the safe
+firmware example, then set its numeric ID, matching stable UID, Wi-Fi details,
+and a FastAPI address reachable from the ESP32:
+
+```powershell
+Copy-Item .\firmware\include\firmware_config.example.h `
+  .\firmware\include\firmware_config.h
+python -m venv .\firmware\.venv
+& .\firmware\.venv\Scripts\python.exe -m pip install platformio==6.1.18
+$env:PLATFORMIO_CORE_DIR = (Resolve-Path .\firmware).Path + "\.platformio"
+& .\firmware\.venv\Scripts\pio.exe run --project-dir .\firmware
+```
+
+For local hardware testing, `127.0.0.1` is not usable from the M5Stack. Publish
+FastAPI to the trusted LAN/hotspot interface and configure that computer's LAN
+address. After flashing, start a frontend session at one point; firmware will
+detect it and send stationary measurements. During a short Wi-Fi/API outage it
+continues bounded RAM capture for that last-confirmed session, then flushes FIFO
+after server re-verification. An explicit completion/cancellation response stops
+new capture; records are never rebound to a replacement point/session.
+
+See [`firmware/README.md`](firmware/README.md) for the pin map, upload/serial
+commands, exact payload, retry/outbox rules, HTTPS configuration, and hardware
+smoke checklist.
 
 ## Environment configuration
 
@@ -463,6 +513,20 @@ npm run test:e2e
 Pop-Location
 ```
 
+Firmware host-logic and M5Stack build gates:
+
+```powershell
+g++ -std=c++17 -Wall -Wextra -Werror -I .\firmware\include `
+  .\firmware\src\firmware_logic.cpp `
+  .\firmware\test\native\test_firmware_logic.cpp `
+  -o .\firmware\test\native\firmware_logic_tests.exe
+& .\firmware\test\native\firmware_logic_tests.exe
+python -B -m unittest firmware.test.static.test_firmware_source -v
+
+$env:PLATFORMIO_CORE_DIR = (Resolve-Path .\firmware).Path + "\.platformio"
+& .\firmware\.venv\Scripts\pio.exe run --project-dir .\firmware
+```
+
 The ordinary Playwright suite uses deterministic route fixtures, mocked
 geolocation, and deterministic map tiles. It covers all public and participant
 routes, honest no-op login, health, device selection and registration, storage
@@ -554,6 +618,8 @@ Its independent jobs are:
   integration against one approved API-prefixed test database.
 - **Backend image build:** builds `backend/Dockerfile`, does not push it, and
   inspects the configured runtime user to reject root execution.
+- **Firmware gates:** compiles and runs pure C++17 state/queue/retry tests, then
+  builds the pinned M5Stack PlatformIO environment from the safe example config.
 
 GitHub-hosted CI cannot be executed locally. The same dependency, type, test,
 browser, migration, and Docker build commands are reproducible locally. The
@@ -660,6 +726,11 @@ Not implemented in v2:
 - browser-side measurement ingestion—the dashboard reads telemetry, while the
   existing ingestion API remains available to approved producers.
 
+- Persistent firmware outbox and end-user Wi-Fi provisioning are not included;
+  current firmware uses a bounded RAM queue and ignored compile-time config.
+- Official AQI/NowCast interpretation is not included; the M5Stack reports raw
+  instantaneous PM mass concentration without health-category wording.
+
 Next production-facing work should design identity/access control first, then
 external secret management, separated migration ownership, HTTPS gateway
 deployment, and observability.
@@ -678,8 +749,16 @@ deployment, and observability.
 - Two non-root application images, health-gated three-service Compose startup,
   automatic migration, restart-safe schema handling, deterministic browser
   tests, and preserved backend CI gates.
+- Session-aware M5Stack ingestion with verified device identity, UTC timestamps,
+  stable per-capture IDs, last-confirmed-session offline capture, bounded
+  backoff, and backend-enforced cross-session isolation.
 
 ## Documentation
+
+- [`firmware/README.md`](firmware/README.md) — firmware wiring, configuration,
+  build/upload, runtime states, failure behaviour, and hardware checklist.
+- [`docs/specs/firmware-v2-api.md`](docs/specs/firmware-v2-api.md) — exact
+  code-derived FastAPI contract used by the device.
 
 - [`docs/specs/telemetry-read-api.md`](docs/specs/telemetry-read-api.md) —
   implemented telemetry-read contract.

@@ -518,6 +518,16 @@ def test_openapi_exposes_postgres_integer_max_for_paths_and_particle_counters() 
     measurement_request = schema["components"]["schemas"][
         "MeasurementCreateRequest"
     ]
+    session_id_schema = next(
+        variant
+        for variant in measurement_request["properties"]["session_id"][
+            "anyOf"
+        ]
+        if variant.get("type") == "integer"
+    )
+    assert session_id_schema["exclusiveMinimum"] == 0
+    assert session_id_schema["maximum"] == POSTGRES_INTEGER_MAX
+    assert "session_id" not in measurement_request["required"]
     for field_name in PARTICLE_COUNTER_FIELDS:
         field_schema = measurement_request["properties"][field_name]
         integer_schema = next(

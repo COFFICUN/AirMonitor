@@ -254,6 +254,149 @@ async def test_complete_http_lifecycle_and_rollback_behavior(
     assert matching_measurement_count == 1
 
 
+async def test_firmware_v2_payload_persists_and_is_frontend_readable(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    device_uid = f"firmware-v2-{uuid4().hex}"
+    created = await client.post(
+        "/api/v1/devices",
+        json={"device_uid": device_uid, "name": "Firmware v2 integration"},
+    )
+    assert created.status_code == 201
+    device_id = created.json()["id"]
+
+    verified = await client.get(f"/api/v1/devices/{device_id}")
+    assert verified.status_code == 200
+    assert verified.json()["device_uid"] == device_uid
+    assert verified.json()["is_active"] is True
+
+    waiting = await client.get(
+        f"/api/v1/devices/{device_id}/sessions/active"
+    )
+    assert waiting.status_code == 404
+    assert waiting.json()["error"]["code"] == "active_session_not_found"
+
+    started = await client.post(
+        f"/api/v1/devices/{device_id}/sessions",
+        json={"latitude": 51.1694, "longitude": 71.4491},
+    )
+    assert started.status_code == 201
+    session_id = started.json()["id"]
+
+    detected = await client.get(
+        f"/api/v1/devices/{device_id}/sessions/active"
+    )
+    assert detected.status_code == 200
+    assert detected.json()["id"] == session_id
+
+    source_message_id = (
+        f"am2-{device_id:08d}-11223344a1b2c3d4-0000002a"
+    )
+    firmware_payload = {
+        "session_id": session_id,
+        "measured_at": started.json()["started_at"],
+        "source_message_id": source_message_id,
+        "temperature": 24.6,
+        "humidity": 41.8,
+        "pm1": 5.0,
+        "pm25": 9.0,
+        "pm10": 14.0,
+        "pc0_3": 824,
+        "pc0_5": 173,
+        "pc1_0": 48,
+        "pc2_5": 7,
+        "pc5_0": 1,
+        "pc10": 0,
+        "latitude": None,
+        "longitude": None,
+        "is_valid": True,
+        "validation_note": None,
+    }
+    recorded = await client.post(
+        f"/api/v1/devices/{device_id}/measurements",
+        json=firmware_payload,
+    )
+    assert recorded.status_code == 201
+    measurement = recorded.json()
+    assert measurement["device_id"] == device_id
+    assert measurement["session_id"] == session_id
+    assert measurement["source_message_id"] == source_message_id
+
+    duplicate = await client.post(
+        f"/api/v1/devices/{device_id}/measurements",
+        json=firmware_payload,
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["code"] == "duplicate_source_message"
+
+    frontend_read = await client.get(
+        f"/api/v1/devices/{device_id}/measurements",
+        params={"session_id": session_id, "limit": 1},
+    )
+    assert frontend_read.status_code == 200
+    assert frontend_read.json()["next_cursor"] is None
+    assert frontend_read.json()["items"] == [measurement]
+
+    async with session_factory() as database_session:
+        persisted = await database_session.get(
+            RawMeasurement,
+            measurement["id"],
+        )
+        persisted_session = await database_session.get(
+            MeasurementSession,
+            session_id,
+        )
+
+    assert persisted is not None
+    assert persisted.source_message_id == source_message_id
+    assert persisted.session_id == session_id
+    assert persisted.pm25 == 9.0
+    assert persisted.latitude is None
+    assert persisted.longitude is None
+    assert persisted_session is not None
+    assert persisted_session.latitude == 51.1694
+    assert persisted_session.longitude == 71.4491
+    assert persisted_session.sample_count == 1
+
+    completed = await client.post(
+        f"/api/v1/devices/{device_id}/sessions/active/complete",
+        json={},
+    )
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "completed"
+
+    after_completion = await client.get(
+        f"/api/v1/devices/{device_id}/sessions/active"
+    )
+    assert after_completion.status_code == 404
+    assert (
+        after_completion.json()["error"]["code"]
+        == "active_session_not_found"
+    )
+
+    replacement = await client.post(
+        f"/api/v1/devices/{device_id}/sessions",
+        json={"latitude": 43.2389, "longitude": 76.8897},
+    )
+    assert replacement.status_code == 201
+    assert replacement.json()["id"] != session_id
+
+    stale_delivery = await client.post(
+        f"/api/v1/devices/{device_id}/measurements",
+        json={
+            **firmware_payload,
+            "source_message_id": f"{source_message_id}-stale",
+            "measured_at": replacement.json()["started_at"],
+        },
+    )
+    assert stale_delivery.status_code == 409
+    assert (
+        stale_delivery.json()["error"]["code"]
+        == "active_session_mismatch"
+    )
+
+
 async def test_cancel_session_clears_runtime_state(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
