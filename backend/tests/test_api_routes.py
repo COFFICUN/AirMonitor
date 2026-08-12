@@ -708,6 +708,7 @@ async def test_record_measurement_calls_service_with_validated_payload(
         lambda: service
     )
     payload = {
+        "session_id": 41,
         "source_message_id": "message-13",
         "measured_at": "2026-07-23T08:30:00Z",
         "temperature": 21.5,
@@ -738,6 +739,7 @@ async def test_record_measurement_calls_service_with_validated_payload(
     assert response.json()["id"] == 13
     service.record_measurement.assert_awaited_once_with(
         device_id=7,
+        session_id=41,
         source_message_id="message-13",
         measured_at=NOW,
         temperature=21.5,

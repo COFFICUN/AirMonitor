@@ -73,6 +73,23 @@ class ActiveSessionNotFoundError(AirMonitorDomainError):
         super().__init__(message)
 
 
+class ActiveSessionMismatchError(AirMonitorDomainError):
+    def __init__(
+        self,
+        expected_session_id: int | None = None,
+        active_session_id: int | None = None,
+    ) -> None:
+        self.expected_session_id = expected_session_id
+        self.active_session_id = active_session_id
+        message = "The active measurement session changed."
+        if expected_session_id is not None and active_session_id is not None:
+            message = (
+                f"Expected active session {expected_session_id}, but session "
+                f"{active_session_id} is active."
+            )
+        super().__init__(message)
+
+
 class SessionNotFoundError(AirMonitorDomainError):
     def __init__(self, session_id: int | None = None) -> None:
         self.session_id = session_id
@@ -155,6 +172,7 @@ class InvalidTimestampError(AirMonitorDomainError):
 
 __all__ = [
     "ActiveSessionAlreadyExistsError",
+    "ActiveSessionMismatchError",
     "ActiveSessionNotFoundError",
     "AirMonitorDomainError",
     "DeviceInactiveError",

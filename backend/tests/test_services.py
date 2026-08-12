@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
     ActiveSessionAlreadyExistsError,
+    ActiveSessionMismatchError,
     ActiveSessionNotFoundError,
     DeviceInactiveError,
     DeviceNotFoundError,
@@ -1259,6 +1260,25 @@ async def test_record_measurement_allows_null_source_message_id() -> None:
     )
     harness.session_repository.increment_sample_count.assert_awaited_once()
     _assert_one_transaction(harness)
+
+
+@pytest.mark.anyio
+async def test_record_measurement_rejects_stale_expected_session() -> None:
+    harness = _measurement_service_harness()
+    _, runtime_state, _ = _prepare_active_measurement_session(harness)
+
+    with pytest.raises(ActiveSessionMismatchError):
+        await harness.service.record_measurement(
+            device_id=DEVICE_ID,
+            session_id=SESSION_ID + 1,
+            measured_at=MEASURED_AT,
+        )
+
+    assert runtime_state.active_session_id == SESSION_ID
+    harness.session_repository.get_by_id_for_update.assert_not_awaited()
+    harness.measurement_repository.create.assert_not_awaited()
+    harness.session_repository.increment_sample_count.assert_not_awaited()
+    _assert_one_transaction(harness, ActiveSessionMismatchError)
 
 
 @pytest.mark.anyio

@@ -11,6 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.errors import install_exception_handlers
 from app.core.exceptions import (
     ActiveSessionAlreadyExistsError,
+    ActiveSessionMismatchError,
     ActiveSessionNotFoundError,
     DeviceInactiveError,
     DeviceNotFoundError,
@@ -215,6 +216,12 @@ async def test_framework_http_500_uses_sanitized_internal_envelope() -> None:
             409,
             "active_session_already_exists",
             "An active measurement session already exists.",
+        ),
+        (
+            lambda: ActiveSessionMismatchError(7, 8),
+            409,
+            "active_session_mismatch",
+            "The active measurement session changed.",
         ),
         (
             lambda: DuplicateSourceMessageError(5, "SECRET-MESSAGE"),

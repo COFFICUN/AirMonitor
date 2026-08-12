@@ -11,6 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.exceptions import (
     ActiveSessionAlreadyExistsError,
+    ActiveSessionMismatchError,
     ActiveSessionNotFoundError,
     AirMonitorDomainError,
     DeviceInactiveError,
@@ -74,6 +75,14 @@ DOMAIN_ERROR_MAPPINGS: tuple[
             status.HTTP_409_CONFLICT,
             "active_session_already_exists",
             "An active measurement session already exists.",
+        ),
+    ),
+    (
+        ActiveSessionMismatchError,
+        ErrorMapping(
+            status.HTTP_409_CONFLICT,
+            "active_session_mismatch",
+            "The active measurement session changed.",
         ),
     ),
     (

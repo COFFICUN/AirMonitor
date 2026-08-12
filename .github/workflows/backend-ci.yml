@@ -5,6 +5,7 @@ on:
     paths:
       - backend/**
       - frontend/**
+      - firmware/**
       - docs/**
       - compose.yaml
       - .env.example
@@ -18,6 +19,7 @@ on:
     paths:
       - backend/**
       - frontend/**
+      - firmware/**
       - docs/**
       - compose.yaml
       - .env.example
@@ -38,6 +40,39 @@ defaults:
     shell: bash
 
 jobs:
+  firmware:
+    name: Firmware host logic and ESP32 build gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install pinned PlatformIO
+        run: python -m pip install --disable-pip-version-check platformio==6.1.18
+
+      - name: Run host-side firmware logic tests
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror \
+            -Ifirmware/include \
+            firmware/test/native/test_firmware_logic.cpp \
+            firmware/src/firmware_logic.cpp \
+            -o /tmp/airmonitor-firmware-tests
+          /tmp/airmonitor-firmware-tests
+
+      - name: Run firmware source regression tests
+        run: python -B -m unittest firmware.test.static.test_firmware_source -v
+
+      - name: Build M5Stack firmware with safe example configuration
+        run: |
+          cp firmware/include/firmware_config.example.h \
+            firmware/include/firmware_config.h
+          pio run --project-dir firmware --environment m5stack-core-esp32
+
   frontend:
     name: Frontend type, unit, browser, and image gates
     runs-on: ubuntu-latest

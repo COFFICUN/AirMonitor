@@ -10,12 +10,14 @@ from app.schemas._base import (
     AwareDatetime,
     NonNegativePostgresInteger,
     ORMResponseModel,
+    PositivePostgresInteger,
     RequestModel,
 )
 
 
 class MeasurementCreateRequest(RequestModel):
     measured_at: AwareDatetime
+    session_id: PositivePostgresInteger | None = None
     source_message_id: str | None = Field(
         default=None,
         max_length=255,

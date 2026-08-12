@@ -208,6 +208,25 @@ def test_measurement_coordinates_may_both_be_omitted() -> None:
     assert request.longitude is None
 
 
+def test_measurement_session_id_is_optional_and_bounded() -> None:
+    assert MeasurementCreateRequest(measured_at=NOW).session_id is None
+    assert (
+        MeasurementCreateRequest(
+            measured_at=NOW,
+            session_id=POSTGRES_INTEGER_MAX,
+        ).session_id
+        == POSTGRES_INTEGER_MAX
+    )
+
+    for invalid_value in (0, POSTGRES_INTEGER_MAX + 1):
+        with pytest.raises(ValidationError) as raised:
+            MeasurementCreateRequest(
+                measured_at=NOW,
+                session_id=invalid_value,
+            )
+        assert raised.value.errors()[0]["loc"] == ("session_id",)
+
+
 @pytest.mark.parametrize(
     "schema_values",
     [
