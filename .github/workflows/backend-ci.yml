@@ -130,12 +130,6 @@ jobs:
   offline:
     name: Offline backend tests
     runs-on: ubuntu-latest
-    env:
-      AIRMONITOR_DATABASE_URL: ""
-      AIRMONITOR_RUN_PERSISTENCE_INTEGRATION: ""
-      AIRMONITOR_TEST_DATABASE_URL: ""
-      AIRMONITOR_API_TEST_DATABASE_URL: ""
-      AIRMONITOR_READ_API_TEST_DATABASE_URL: ""
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
