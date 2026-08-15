@@ -74,3 +74,7 @@ frontend/.playwright-cli/
 .pytest_cache/
 __pycache__/
 *.py[cod]
+
+# Local AI agent skills
+.agents/skills/
+backend/.agents/skills/
