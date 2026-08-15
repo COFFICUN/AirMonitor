@@ -1,0 +1,27 @@
+* { box-sizing: border-box; }
+html { min-width: 320px; min-height: 100%; scroll-behavior: smooth; }
+body { min-width: 320px; min-height: 100vh; margin: 0; background: var(--color-canvas); }
+body, button, input, select, textarea { font: inherit; }
+button, input, select, textarea, a { -webkit-tap-highlight-color: transparent; }
+button, a, input, select, textarea, summary, [tabindex] { outline-offset: 3px; }
+:focus-visible { outline: 3px solid var(--focus-ring); }
+a { color: inherit; }
+img, svg { max-width: 100%; }
+h1, h2, h3, p { overflow-wrap: break-word; }
+h1, h2, h3 { color: var(--color-ink); font-family: var(--font-display); line-height: 1.08; text-wrap: balance; }
+h1 { margin: 0; font-size: clamp(2.55rem, 5.7vw, 5.4rem); font-weight: 780; letter-spacing: -0.045em; }
+h2 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.7rem); font-weight: 760; letter-spacing: -0.03em; }
+h3 { margin: 0; font-size: 1.15rem; letter-spacing: -0.01em; }
+p { line-height: 1.65; }
+button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: 0.72; }
+.visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0,0,0,0) !important; white-space: nowrap !important; border: 0 !important; }
+.skip-link { position: fixed; z-index: 999; top: var(--space-3); left: var(--space-3); padding: var(--space-3) var(--space-4); color: #fff; background: var(--color-navy); border-radius: var(--radius-sm); transform: translateY(-160%); transition: transform var(--duration-fast); }
+.skip-link:focus { transform: translateY(0); }
+.public-container { width: min(var(--content-width), calc(100% - 3rem)); margin-inline: auto; }
+.eyebrow { margin: 0 0 var(--space-3); color: var(--color-blue); font-family: var(--font-mono); font-size: 0.72rem; font-weight: 750; letter-spacing: 0.12em; text-transform: uppercase; }
+.eyebrow--light, .eyebrow--signal { color: var(--color-lime); }
+.text-link { color: var(--color-blue); font-weight: 700; text-decoration: none; }
+.text-link:hover { color: var(--color-blue-hover); text-decoration: underline; text-underline-offset: 0.25em; }
+.text-link--arrow::after { content: ' →'; }
+.route-loading { display: grid; min-height: 60vh; place-items: center; color: var(--color-muted); }
+.button-row { display: flex; flex-wrap: wrap; gap: var(--space-3); }

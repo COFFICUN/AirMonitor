@@ -6,6 +6,10 @@
 # Firmware credentials
 secrets.h
 **/secrets.h
+firmware/include/firmware_config.h
+firmware/.pio/
+firmware/.platformio/
+firmware/.venv/
 
 # TLS certificates and private keys
 *.pem
@@ -53,3 +57,28 @@ Desktop.ini
 *.temp
 *.bak
 *.swp
+
+# AirMonitor v2 local environment and test cache
+backend/.venv/
+backend/.pytest_cache/
+
+# AirMonitor frontend v2 dependencies, builds, and browser artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/.playwright-cli/
+
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+# Local AI agent skills
+.agents/skills/
+backend/.agents/skills/
+
+# Local AI development configuration
+AGENTS.md
+skills-lock.json

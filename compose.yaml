@@ -1,0 +1,90 @@
+services:
+  db:
+    image: postgres:18.4-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:?Set POSTGRES_DB in the root .env file}"
+      POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER in the root .env file}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the root .env file}"
+    volumes:
+      - airmonitor-db-data:/var/lib/postgresql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 30s
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+    environment:
+      AIRMONITOR_APP_NAME: AirMonitor API
+      AIRMONITOR_APP_VERSION: 2.0.0
+      AIRMONITOR_SERVICE_NAME: airmonitor-api
+      AIRMONITOR_ENVIRONMENT: development
+      AIRMONITOR_DEBUG: "false"
+      AIRMONITOR_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:?Set POSTGRES_USER in the root .env file}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the root .env file}@db:5432/${POSTGRES_DB:?Set POSTGRES_DB in the root .env file}"
+      AIRMONITOR_DATABASE_ECHO: "false"
+      AIRMONITOR_DATABASE_POOL_PRE_PING: "true"
+      UVICORN_HOST: 0.0.0.0
+      UVICORN_PORT: "8000"
+    ports:
+      - "${AIRMONITOR_API_BIND_ADDRESS:-127.0.0.1}:${AIRMONITOR_API_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+        restart: true
+    ports:
+      - "127.0.0.1:${AIRMONITOR_FRONTEND_PORT:-8080}:8080"
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://127.0.0.1:8080/frontend-health
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 10s
+
+volumes:
+  airmonitor-db-data:

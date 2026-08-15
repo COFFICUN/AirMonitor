@@ -1,357 +1,523 @@
 # AirMonitor
 
-AirMonitor is a portable IoT system for collecting, storing, and visualizing air-quality and urban microclimate measurements.
+**Portable IoT platform for air-quality and urban microclimate monitoring.**
 
-The project combines an ESP32-based M5Stack device, a PMSA003 particulate-matter sensor, an SHT31 temperature and humidity sensor, a Flask backend, a SQLite database, and a browser-based dashboard with charts, AQI indicators, measurement sessions, and geolocation-based map views.
+AirMonitor is an end-to-end IoT system that combines an ESP32-based measurement
+device, a FastAPI backend, PostgreSQL storage, and a React dashboard for
+collecting, storing, and visualizing environmental telemetry.
 
-> **Project status:** this repository contains the original diploma implementation, preserved as **AirMonitor v1.0**. A portfolio-oriented v2.0 is planned with FastAPI, PostgreSQL, SQLAlchemy, Alembic, Docker, automated tests, and CI/CD.
+The device is portable and can be moved between selected locations, while each
+measurement session itself is stationary and associated with one geographic
+point.
 
-## Main capabilities
+![AirMonitor landing page](docs/assets/screenshots/landing-desktop.png)
 
-- Measures PM1.0, PM2.5, PM10, temperature, humidity, and particle counts.
-- Displays live sensor values and device status on the M5Stack screen.
-- Sends JSON measurements from the ESP32 to the backend over Wi-Fi.
-- Starts and stops geolocated measurement sessions from the web interface.
-- Stores raw measurements and session summaries in SQLite.
-- Calculates PM2.5-based AQI and a simplified EPA NowCast estimate.
-- Builds a smoothed PM2.5 chart for the latest session.
-- Shows AQI markers, approximate zones, and a measurement route on a Leaflet map.
-- Exports completed sessions to CSV.
-- Provides health and status endpoints for diagnostics.
+---
 
-## System architecture
+## Overview
 
-```mermaid
-flowchart LR
-    PMS[PMSA003<br/>PM and particle sensor] --> ESP[M5Stack Basic / ESP32]
-    SHT[SHT31<br/>temperature and humidity] --> ESP
-    ESP -->|HTTPS JSON POST| API[Flask backend]
-    Browser[Browser geolocation<br/>and dashboard] -->|REST requests| API
-    API --> DB[(SQLite)]
-    API --> UI[HTML / CSS / JavaScript dashboard]
-    UI --> Charts[Chart.js]
-    UI --> Map[Leaflet map]
-```
+AirMonitor collects environmental data from a physical sensor device, sends it
+to a backend API, stores it in PostgreSQL, and presents the measurements through
+a web application.
 
-## Hardware
+AirMonitor v2 includes:
 
-| Component | Purpose |
-|---|---|
-| M5Stack Basic v2.7 / ESP32 | Main controller, Wi-Fi communication, and local display |
-| PMSA003 | PM1.0, PM2.5, PM10, and particle-count measurements |
-| SHT31 | Temperature and relative-humidity measurements |
-| USB power bank | Portable power supply |
+- firmware for M5Stack Basic / ESP32;
+- PMSA003 particulate-matter sensor integration;
+- SHT30 temperature and humidity sensor integration;
+- Wi-Fi telemetry delivery;
+- FastAPI REST backend;
+- PostgreSQL persistence;
+- Alembic database migrations;
+- React + TypeScript dashboard;
+- live telemetry and measurement history;
+- charts and geographic measurement points;
+- Docker Compose local environment;
+- automated backend, frontend, integration, and firmware verification.
 
-### Sensor connections
+The project started as an academic prototype and has since been redesigned with
+a new backend, database layer, frontend, firmware, testing strategy, and
+containerized runtime.
 
-| Sensor pin | M5Stack / ESP32 pin |
-|---|---|
-| PMSA003 VCC | 5 V |
-| PMSA003 GND | GND |
-| PMSA003 TXD | GPIO16 / RX2 |
-| PMSA003 RXD | GPIO17 / TX2 |
-| SHT31 VDD | 3.3 V or 5 V, depending on the module |
-| SHT31 GND | GND |
-| SHT31 SDA | GPIO21 |
-| SHT31 SCL | GPIO22 |
+---
 
-## Firmware behavior
+## Key Features
 
-The Arduino sketch is stored in `test1_final.ino`.
+### IoT Device
 
-- Sensor readings are refreshed every 2 seconds.
-- Measurements are sent automatically every 5 seconds.
-- The interface is refreshed approximately every 800 ms.
-- Wi-Fi reconnection is checked every 10 seconds.
-- PM values are smoothed with a five-sample buffer before display and transmission.
-- Button A switches between the main, particle-count, and system-status screens.
-- Button B performs a manual measurement upload.
-- Button C enables or disables automatic server uploads.
-
-The firmware sends payloads similar to:
-
-```json
-{
-  "device_uid": "airmonitor-main",
-  "sent_at_utc": "2026-07-21T07:00:00Z",
-  "temperature": 24.6,
-  "humidity": 42.1,
-  "pm1": 8,
-  "pm25": 14,
-  "pm10": 19,
-  "pc0_3": 1024,
-  "pc0_5": 340,
-  "pc1_0": 81,
-  "pc2_5": 12,
-  "pc5_0": 2,
-  "pc10": 0
-}
-```
-
-The backend assigns latitude and longitude from the active browser-controlled measurement session rather than trusting coordinates sent by the device.
-
-## Technology stack
-
-### Firmware
-
-- C++ / Arduino
-- M5Stack library
-- WiFi and HTTPClient
-- ArduinoJson
-- Adafruit SHT31
-- Plantower PMS7003-compatible library
+- M5Stack Basic / ESP32 firmware written in C++;
+- PMSA003 particulate sensor;
+- SHT30 temperature and humidity sensor;
+- configurable Wi-Fi and API settings;
+- UTC timestamps;
+- session-aware telemetry delivery;
+- idempotent measurement delivery;
+- bounded in-memory outbox for temporary network failures.
 
 ### Backend
 
-- Python 3.13
-- Flask 3.1
-- SQLite
-- Python `zoneinfo` with `tzdata`
+- FastAPI REST API;
+- asynchronous PostgreSQL access;
+- SQLAlchemy repository layer;
+- Alembic migrations;
+- request validation and structured error handling;
+- device lifecycle management;
+- measurement-session lifecycle;
+- raw telemetry ingestion;
+- session and measurement history;
+- opaque keyset pagination;
+- OpenAPI 3.1 contract.
 
 ### Frontend
 
-- HTML, CSS, and JavaScript in a single template
-- Bootstrap 5
-- Font Awesome
-- Chart.js
-- Leaflet
+- React + TypeScript;
+- responsive participant dashboard;
+- public project pages;
+- device connection workflow;
+- measurement-session controls;
+- live telemetry;
+- historical measurements;
+- charts and statistics;
+- session history;
+- map-based measurement-point visualization;
+- light and dark themes;
+- responsive mobile layout;
+- automated frontend and E2E testing.
 
-## Repository structure
+### Infrastructure
 
-```text
-AirMonitor/
-├── app.py                 # Flask backend, REST endpoints, analytics, and HTML rendering
-├── index.html             # Dashboard template with embedded CSS and JavaScript
-├── test1_final.ino        # ESP32 / M5Stack firmware
-├── secrets.example.h      # Public Wi-Fi credential template
-├── init_db.py             # Creates a clean local SQLite database
-├── schema.sql             # Database schema and default device record
-├── requirements.txt       # Reproducible Python dependencies
-├── .gitignore             # Excludes credentials, certificates, databases, and local files
-├── .gitattributes         # Normalizes text files and line endings
-├── LICENSE
-└── README.md
-```
+- Dockerized backend;
+- Dockerized frontend;
+- PostgreSQL service;
+- Docker Compose stack;
+- automatic database migrations;
+- container health checks;
+- non-root application containers;
+- GitHub Actions CI.
 
-The following local files are intentionally excluded from Git:
+---
 
-```text
-.venv/
-secrets.h
-sensor_data.db
-*.pem
-*.key
-.env
-```
+## Tech Stack
 
-## Database model
-
-The current application uses these primary entities:
-
-| Table | Purpose |
+| Area | Technologies |
 |---|---|
-| `devices` | Registered AirMonitor devices |
-| `device_runtime_state` | Active session, measurement state, and current fixed coordinates |
-| `raw_measurements` | Individual packets received from the ESP32 |
-| `measurement_sessions` | Aggregated summary of a geolocated measurement session |
-| `raw_session_links` | Links raw packets to their session |
-| `aggregated_measurements` | Reserved legacy table for time-window aggregation |
+| Backend | Python, FastAPI, SQLAlchemy, Alembic |
+| Database | PostgreSQL |
+| API | REST, OpenAPI |
+| Frontend | React, TypeScript, Vite |
+| Testing | pytest, Vitest, Playwright |
+| Infrastructure | Docker, Docker Compose, GitHub Actions |
+| Firmware | C++, PlatformIO, Arduino-ESP32 |
+| Hardware | M5Stack Basic / ESP32, PMSA003, SHT30 |
+| Maps | Leaflet |
 
-The production database is not published because it can contain real geolocation and measurement history.
+---
 
-## REST endpoints
+## System Architecture
 
-| Method | Endpoint | Purpose |
-|---|---|---|
-| `GET` | `/` | Render the dashboard |
-| `POST` | `/start_measurement` | Start a session using browser latitude and longitude |
-| `POST` | `/stop_measurement` | Stop the current session |
-| `POST` | `/update_location` | Initialize or refresh the active measurement location |
-| `POST` | `/update` | Receive a measurement packet from the ESP32 |
-| `GET` | `/api/measurement-status` | Return the current measurement state |
-| `GET` | `/api/location-status` | Return location and session status |
-| `GET` | `/api/live` | Return the live dashboard payload |
-| `GET` | `/api/chart` | Return chart data for the active or latest session |
-| `GET` | `/api/map` | Return map points and route data |
-| `GET` | `/api/nowcast` | Return the simplified NowCast result |
-| `GET` | `/export/csv` | Export session summaries as CSV |
-| `GET` | `/health` | Return server, device, and database diagnostics |
+```text
+PMSA003 + SHT30
+       │
+       ▼
+M5Stack Basic / ESP32
+       │
+       │ Wi-Fi / HTTP(S)
+       ▼
+     FastAPI
+       │
+       ▼
+Application Services
+       │
+       ▼
+Repositories
+       │
+       ▼
+SQLAlchemy AsyncSession
+       │
+       ▼
+   PostgreSQL
+       │
+       ▼
+React / TypeScript Dashboard
+```
 
-## Local setup on Windows
+The backend uses a layered architecture:
 
-### 1. Clone the repository
+```text
+HTTP Route
+   │
+   ├── validation
+   ├── dependency injection
+   ▼
+Application Service
+   ▼
+Repository
+   ▼
+SQLAlchemy AsyncSession
+   ▼
+PostgreSQL
+```
 
-```powershell
-git clone https://github.com/YOUR_USERNAME/AirMonitor.git
+Application services own transaction boundaries while repositories focus on
+database operations.
+
+---
+
+## Measurement Model
+
+AirMonitor is portable, but each measurement session represents a **stationary
+measurement point**.
+
+```text
+Move device to selected location
+            │
+            ▼
+Start measurement session
+            │
+            ▼
+Capture geographic coordinates
+            │
+            ▼
+Collect environmental telemetry
+            │
+            ▼
+Store measurements under the session
+            │
+            ▼
+Complete session
+            │
+            ▼
+Move device to the next location
+```
+
+Coordinates are fixed when the session starts.
+
+AirMonitor does not continuously track movement or construct a route while a
+measurement session is active.
+
+---
+
+## Screenshots
+
+### Dashboard
+
+![AirMonitor dashboard](docs/assets/screenshots/dashboard-overview.png)
+
+### Active Measurement
+
+![Active measurement](docs/assets/screenshots/active-measurement.png)
+
+### Measurement Map
+
+![Measurement map](docs/assets/screenshots/session-map.png)
+
+### Mobile Interface
+
+<img src="docs/assets/screenshots/landing-mobile.png"
+     alt="AirMonitor mobile interface"
+     width="360">
+
+### Dark Theme
+
+![AirMonitor dark theme](docs/assets/screenshots/landing-dark.png)
+
+--- 
+
+## API
+
+AirMonitor v2 currently exposes 11 OpenAPI operations, including the health
+endpoint and versioned `/api/v1` API.
+
+Main API areas include:
+
+```text
+/health
+
+/api/v1/devices
+/api/v1/devices/{device_id}
+
+/api/v1/devices/{device_id}/sessions
+/api/v1/devices/{device_id}/measurements
+```
+
+Supported workflows include:
+
+- device creation and retrieval;
+- device activation and deactivation;
+- session start;
+- active-session lookup;
+- session completion and cancellation;
+- telemetry ingestion;
+- session history;
+- measurement history.
+
+Detailed contracts are available in [`docs/specs`](docs/specs/).
+
+---
+
+## Telemetry Pagination
+
+Historical telemetry uses opaque keyset pagination rather than traditional
+offset pagination.
+
+The implementation uses:
+
+- stable descending ordering;
+- opaque cursors;
+- bounded `limit + 1` repository reads;
+- strict query validation;
+- database indexes designed for supported read patterns.
+
+See the
+[Telemetry Read API specification](docs/specs/telemetry-read-api.md)
+for additional details.
+
+---
+
+## Running Locally
+
+### Requirements
+
+You need:
+
+- Docker;
+- Docker Compose;
+- Git.
+
+Clone the repository:
+
+```bash
+git clone https://github.com/COFFICUN/AirMonitor.git
 cd AirMonitor
 ```
 
-### 2. Create and activate a virtual environment
+Create a local environment file.
 
-```powershell
-py -3.13 -m venv .venv
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
+Linux/macOS:
+
+```bash
+cp .env.example .env
 ```
 
-### 3. Install Python dependencies
+Windows PowerShell:
 
 ```powershell
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-### 4. Create a local database
+Review the example configuration and start the stack:
 
-```powershell
-python init_db.py
+```bash
+docker compose up --build
 ```
 
-This creates `sensor_data.db` and registers the default device UID expected by the application:
+The stack starts PostgreSQL, applies database migrations, starts the FastAPI
+service, and serves the frontend.
+
+### Useful Commands and Endpoints
+
+The local stack is defined in [`compose.yaml`](compose.yaml).
+
+The backend container is built from
+[`backend/Dockerfile`](backend/Dockerfile).
+
+Start the complete stack:
+
+```bash
+docker compose up --build
+```
+
+Stop the stack:
+
+```bash
+docker compose down
+```
+
+After startup, the backend is available at:
+
+- Health check: http://127.0.0.1:8000/health
+- OpenAPI schema: http://127.0.0.1:8000/openapi.json
+
+The current Alembic migration head is:
 
 ```text
-airmonitor-main
+a75caa2b44f5
 ```
 
-### 5. Configure local HTTPS files
+---
 
-The current v1.0 backend expects these local files next to `app.py`:
+## Firmware
+
+Firmware v2 is located in:
 
 ```text
-172.20.10.4+2.pem
-172.20.10.4+2-key.pem
+firmware/
 ```
 
-They are intentionally excluded from Git. Use your own local certificate and key, then update the filenames in the `if __name__ == "__main__"` block of `app.py` when necessary.
+It is built with PlatformIO for the ESP32 platform.
 
-The printed URL and the firmware server URL are also configured for the original iPhone hotspot network. Update them when your server uses another local IP address.
+Device-specific secrets and connection settings are not committed to Git.
 
-### 6. Run the backend
+Start from:
 
-```powershell
-python app.py
+```text
+firmware/include/firmware_config.example.h
 ```
 
-The Flask development server listens on all local interfaces on port `5000`.
+More information is available in
+[`firmware/README.md`](firmware/README.md).
 
-## Firmware setup
+---
 
-### 1. Create the local credentials file
+## Testing
 
-Copy the public template:
+AirMonitor contains automated verification at several levels.
 
-```powershell
-Copy-Item .\secrets.example.h .\secrets.h
+```text
+Backend
+├── unit tests
+├── service tests
+├── repository tests
+├── API contract tests
+├── OpenAPI tests
+├── migration tests
+└── PostgreSQL integration tests
+
+Frontend
+├── component tests
+├── API client tests
+├── feature tests
+├── accessibility checks
+└── Playwright E2E tests
+
+Firmware
+├── native logic tests
+└── static source checks
 ```
 
-Edit `secrets.h`:
+PostgreSQL integration tests are guarded so destructive operations run only
+against explicitly disposable test databases.
 
-```cpp
-#pragma once
+---
 
-const char* WIFI_SSID = "YOUR_WIFI_NAME";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+## Continuous Integration
+
+GitHub Actions automatically verifies important parts of the project.
+
+The CI pipeline covers:
+
+- backend verification;
+- PostgreSQL integration;
+- API contracts;
+- frontend verification;
+- container-related checks;
+- firmware verification.
+
+---
+
+## Repository Structure
+
+```text
+AirMonitor/
+├── .github/
+│   └── workflows/
+│
+├── backend/
+│   ├── alembic/
+│   ├── app/
+│   └── tests/
+│
+├── frontend/
+│   ├── e2e/
+│   ├── public/
+│   └── src/
+│
+├── firmware/
+│   ├── include/
+│   ├── src/
+│   └── test/
+│
+├── docs/
+│   ├── assets/
+│   │   └── screenshots/
+│   └── specs/
+│
+├── compose.yaml
+├── .env.example
+├── README.md
+└── LICENSE
 ```
 
-`secrets.h` is ignored by Git and must never be committed.
+The repository also contains the original AirMonitor v1 prototype at the root
+for historical reference.
 
-### 2. Update the backend address
+Active development targets AirMonitor v2 under:
 
-In `test1_final.ino`, update:
+- `backend/`;
+- `frontend/`;
+- `firmware/`.
 
-```cpp
-const char* serverURL = "https://YOUR_SERVER_IP:5000/update";
-```
+---
 
-The laptop, phone or browser, and M5Stack device must be connected to the same network.
+## Documentation
 
-### 3. Install Arduino libraries
+Public engineering specifications:
 
-Install the libraries used by the sketch:
+- [Telemetry Read API](docs/specs/telemetry-read-api.md)
+- [Firmware v2 API](docs/specs/firmware-v2-api.md)
+- [Frontend v2 specification](docs/specs/frontend-user-redesign.md)
+- [Authentication future scope](docs/specs/authentication-future-scope.md)
 
-- M5Stack
-- ArduinoJson
-- Adafruit SHT31 Library
-- Plantower PMS7003-compatible library
+---
 
-Then select the appropriate M5Stack / ESP32 board and upload the sketch.
+## Current Limitations
 
-## Measurement workflow
+AirMonitor v2 is still evolving.
 
-1. Start the Flask server.
-2. Open the dashboard from a browser on the same local network.
-3. Allow browser geolocation access.
-4. Start a measurement session from the dashboard.
-5. The ESP32 begins receiving successful responses from `/update` and uploads a packet every 5 seconds.
-6. The dashboard refreshes live data, location state, charts, and map information through the API.
-7. Stop the session when the measurement at the current control point is complete.
-8. Move to another point and start a new session.
+Current known limitations include:
 
-When no session is active, `/update` returns HTTP `409`, and the firmware displays `WAIT START`.
+- authentication and user accounts are not part of the current MVP;
+- production deployment infrastructure is not yet included;
+- device provisioning remains configuration-based;
+- multi-user workflows are not yet implemented;
+- multi-device user workflows remain future scope.
 
-## Data processing
+These capabilities are intentionally presented as future work rather than
+completed functionality.
 
-- Invalid negative particle values are rejected.
-- Humidity is validated within `0–100%`.
-- Temperature is validated within `-40–85 °C`.
-- Coordinates are checked against valid latitude and longitude ranges.
-- Session summaries include averages, minimum and maximum PM2.5 values, coordinates, sample count, and AQI.
-- Chart PM2.5 values use a five-point moving average.
-- The short-term forecast uses a simple linear trend over recent session values.
-- NowCast uses a simplified weighted calculation based on recent hourly PM2.5 averages.
+---
 
-## Security and privacy
+## Roadmap
 
-- Wi-Fi credentials are stored only in `secrets.h`, which is excluded from Git.
-- TLS private keys and certificates are excluded through `.gitignore`.
-- The local SQLite database is excluded because it may contain geolocation history.
-- A public repository should contain only `secrets.example.h`, never `secrets.h`.
+Planned development includes:
 
-### Important v1.0 security limitation
+- authentication and authorization;
+- user accounts;
+- multi-device support;
+- improved device provisioning;
+- production deployment;
+- monitoring and observability;
+- further firmware reliability improvements;
+- wider real-world field testing.
 
-The firmware currently calls:
+---
 
-```cpp
-client.setInsecure();
-```
+## Legacy v1
 
-This disables TLS certificate verification. HTTPS encryption is used, but the device does not verify the server identity. This is acceptable only for a controlled local demonstration network and must be replaced with certificate validation before production use.
+The original AirMonitor prototype used:
 
-## Known limitations
+- Flask;
+- SQLite;
+- an earlier browser interface;
+- earlier firmware.
 
-- The Flask development server is not intended for production deployment.
-- The local server IP and certificate filenames are hard-coded.
-- The firmware currently supports one configured server and one device UID.
-- SQLite is suitable for a local prototype but limits concurrent and distributed deployment.
-- The frontend keeps HTML, CSS, and JavaScript in one large template.
-- Browser geolocation is required before sensor packets are accepted.
-- AQI, NowCast, and short-term forecast values are analytical approximations, not regulatory monitoring results.
-- The dashboard depends on external CDN resources for Bootstrap, Font Awesome, Chart.js, and Leaflet.
+The v1 files remain in the repository as historical reference material.
 
-## Planned AirMonitor v2.0
+AirMonitor v2 does not depend on the legacy Flask/SQLite application.
 
-- FastAPI backend
-- PostgreSQL
-- SQLAlchemy ORM
-- Alembic migrations
-- Structured project modules
-- Environment-based configuration
-- Docker and Docker Compose
-- Logging and error handling
-- Pytest test suite
-- GitHub Actions CI
-- External CSS and JavaScript files
-- Safer certificate handling
-- Improved device configuration
-
-Future v3.0 ideas include MQTT, Redis, Celery, WebSockets, Prometheus, Grafana, OAuth, Nginx, and Kubernetes after the v2.0 foundation is complete.
+---
 
 ## License
 
-This project is available under the MIT License. See `LICENSE` for details.
-
-## Author
-
-**Nazar Telmanov**  
-System Engineering diploma project  
-Almaty, Kazakhstan
+This project is distributed under the terms of the repository
+[LICENSE](LICENSE).

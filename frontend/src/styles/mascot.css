@@ -1,0 +1,7 @@
+.airi-mascot { display: block; height: auto; object-fit: contain; }
+.airi-mascot--compact { width: 13rem; max-height: 19rem; object-fit: cover; object-position: center 44%; border-radius: 5rem 5rem var(--radius-lg) var(--radius-lg); }
+
+html[data-motion='reduced'] .loading-skeleton span { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
