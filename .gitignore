@@ -78,3 +78,7 @@ __pycache__/
 # Local AI agent skills
 .agents/skills/
 backend/.agents/skills/
+
+# Local AI development configuration
+AGENTS.md
+skills-lock.json
