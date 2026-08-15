@@ -130,6 +130,12 @@ jobs:
   offline:
     name: Offline backend tests
     runs-on: ubuntu-latest
+    env:
+      AIRMONITOR_DATABASE_URL: ""
+      AIRMONITOR_RUN_PERSISTENCE_INTEGRATION: ""
+      AIRMONITOR_TEST_DATABASE_URL: ""
+      AIRMONITOR_API_TEST_DATABASE_URL: ""
+      AIRMONITOR_READ_API_TEST_DATABASE_URL: ""
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -159,7 +165,13 @@ jobs:
 
       - name: Run complete offline backend suite
         working-directory: backend
-        run: python -B -m pytest -p no:cacheprovider
+        run: |
+          unset AIRMONITOR_DATABASE_URL
+          unset AIRMONITOR_RUN_PERSISTENCE_INTEGRATION
+          unset AIRMONITOR_TEST_DATABASE_URL
+          unset AIRMONITOR_API_TEST_DATABASE_URL
+          unset AIRMONITOR_READ_API_TEST_DATABASE_URL
+          python -B -m pytest -p no:cacheprovider
 
   postgresql:
     name: Guarded PostgreSQL integration
