@@ -5,7 +5,7 @@ import { installMockBackend } from './fixtures';
 
 test.skip(process.env.AIRMONITOR_VISUAL_CAPTURE !== '1', 'Creates the reviewed screenshot set on demand.');
 
-const outputRoot = path.resolve('..', 'docs', 'reviews', 'frontend-user-redesign-screenshots');
+const outputRoot = path.resolve('test-results', 'visual');
 
 async function settle(page: import('@playwright/test').Page) {
   await page.locator('.route-loading').waitFor({ state: 'detached' });
@@ -77,3 +77,4 @@ test('capture reviewed public and participant surfaces', async ({ context, page 
   await page.goto('/app');
   await capture(page, '14-overview-mobile.png', true);
 });
+

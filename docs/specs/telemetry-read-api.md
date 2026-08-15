@@ -13,9 +13,7 @@ telemetry read MVP. The two approved routes and their application layers are
 implemented. The ordered index migration and guarded PostgreSQL integration
 coverage are verified against PostgreSQL 18.4, including the reversible live
 migration cycle, exact catalog inventory, both integration suites, and all six
-representative `EXPLAIN (ANALYZE, BUFFERS)` shapes. See
-[`telemetry-read-api-final-verification.md`](../reviews/telemetry-read-api-final-verification.md)
-for the checkout-specific result.
+representative `EXPLAIN (ANALYZE, BUFFERS)` shapes.
 
 ## Approved endpoints
 
@@ -537,3 +535,4 @@ An implementation is conformant only if it proves:
 - reads do not mutate any protected state;
 - index coverage is demonstrated or delivered through a reviewed migration;
 - offline and disposable PostgreSQL tests cover the contract.
+
