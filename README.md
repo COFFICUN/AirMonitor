@@ -314,6 +314,36 @@ docker compose up --build
 The stack starts PostgreSQL, applies database migrations, starts the FastAPI
 service, and serves the frontend.
 
+### Useful Commands and Endpoints
+
+The local stack is defined in [`compose.yaml`](compose.yaml).
+
+The backend container is built from
+[`backend/Dockerfile`](backend/Dockerfile).
+
+Start the complete stack:
+
+```bash
+docker compose up --build
+```
+
+Stop the stack:
+
+```bash
+docker compose down
+```
+
+After startup, the backend is available at:
+
+- Health check: http://127.0.0.1:8000/health
+- OpenAPI schema: http://127.0.0.1:8000/openapi.json
+
+The current Alembic migration head is:
+
+```text
+a75caa2b44f5
+```
+
 ---
 
 ## Firmware
